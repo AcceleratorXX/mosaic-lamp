@@ -607,11 +607,11 @@ function modelZip(p) {
 // </logic>
 
 // ---- Інтерфейс ----
-var DEFAULTS = { W: 5, D: 5, H: 5, cube: true, qty: 1, chip: 25, gap: 5, sheetGap: 5, tm: 4, mcolor: '#f2692e', cols: 12, rows: 12, priceM: 0,
+var DEFAULTS = { W: 5, D: 5, H: 5, cube: true, qty: 1, chip: 25, gap: 1.5, sheetGap: 1.5, tm: 4, mcolor: '#f2692e', cols: 12, rows: 12, priceM: 0,
   split: true, ta: 2, edge: 0, bottom: 0, lid: 'on', walls: 'fb', kerf: 0.2, ownW: 800, ownH: 500, ownN: 1,
   catalog: '150 300 100\n300 300 190\n300 500 315\n400 500 405\n500 500 465\n600 500 535\n800 500 685\n500 1000 815\n500 1500 1190\n1000 1000 1480' };
 var INT = { W: 1, D: 1, H: 1, qty: 1, cols: 1, rows: 1, ownN: 1 };
-var KEY = 'mosaic-lamp-v5';
+var KEY = 'mosaic-lamp-v6';
 var $ = function (id) { return document.getElementById(id); };
 var nf = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
 function mm(x) { return nf.format(Math.round(x * 10) / 10); }
@@ -720,7 +720,7 @@ function render() {
   if (p.cube) { $('D').value = p.W; $('H').value = p.W; }
   save(p);
   var ps = Object.assign({}, p, { gap: p.sheetGap });
-  $('sheetHint').innerHTML = 'У листі <b>' + p.cols + ' × ' + p.rows + '</b>, разом ' + (p.cols * p.rows) + ' чіпів.';
+  $('sheetHint').innerHTML = 'У листі <b>' + p.cols + ' × ' + p.rows + '</b>, разом ' + (p.cols * p.rows) + ' чіпів. Розмір листа <b>' + mm(span(p.cols, ps)) + ' × ' + mm(span(p.rows, ps)) + ' мм</b>.';
 
   var faces = buildFaces(p);
   var mos = packMosaic(faces, p.rows, p.cols, p.split);
