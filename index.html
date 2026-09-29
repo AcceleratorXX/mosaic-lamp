@@ -1,0 +1,971 @@
+<meta charset="utf-8">
+<title>Розкрій мозаїчного світильника</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Unbounded:wght@500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+/* Layout: майстерня на розкрійному килимку — зліва липка панель параметрів, справа креслення й таблиці */
+:root {
+  --bg: #F1F4F1;
+  --surface: #FFFFFF;
+  --sunken: #E7ECE8;
+  --fg: #17211D;
+  --muted: #5A6A63;
+  --line: #D3DAD5;
+  --accent: #1F6F5C;
+  --accent-fg: #FFFFFF;
+  --warn: #A8480F;
+  --warn-bg: #FBEBDD;
+  --grout: #BFC7C2;
+  --chip-free: #E1E7E3;
+  --acryl: #DDEBF0;
+  --on-chip: #14201C;
+  --f-top: #E3A93F;
+  --f-front: #3DAE9C;
+  --f-back: #5C8FE0;
+  --f-left: #A87BD6;
+  --f-right: #E67A63;
+  --night: #07090A;
+  --font-display: "Unbounded", "Onest", system-ui, sans-serif;
+  --font-body: "Onest", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101714; --surface: #172019; --sunken: #0C120F; --fg: #E5ECE8; --muted: #93A49B;
+    --line: #2A3730; --accent: #5FC7AA; --accent-fg: #0B1612; --warn: #F2A36B; --warn-bg: #3A2413;
+    --grout: #0A0F0D; --chip-free: #25312B; --acryl: #1D3138; --on-chip: #14201C;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101714; --surface: #172019; --sunken: #0C120F; --fg: #E5ECE8; --muted: #93A49B;
+  --line: #2A3730; --accent: #5FC7AA; --accent-fg: #0B1612; --warn: #F2A36B; --warn-bg: #3A2413;
+  --grout: #0A0F0D; --chip-free: #25312B; --acryl: #1D3138; --on-chip: #14201C;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.45;
+  padding-inline: 16px; padding-block: 20px 48px;
+}
+.app { max-width: 1280px; margin-inline: auto; display: grid; gap: 20px; }
+header.top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+header.top p { margin: 0; color: var(--muted); max-width: 65ch; }
+.cols { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+
+/* Параметри */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: grid; }
+@media (min-width: 901px) { .panel { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 24px); overflow-y: auto; } }
+fieldset { border: 0; margin: 0; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+fieldset + fieldset { border-top: 1px solid var(--line); }
+legend { float: left; width: 100%; padding: 0; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+legend + * { clear: both; }
+.row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.f { display: grid; gap: 3px; min-width: 0; }
+.f > span { font-size: 12px; color: var(--muted); }
+input[type="number"], select {
+  width: 100%; font: inherit; font-family: var(--font-mono); font-size: 14px;
+  padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--fg);
+}
+select { font-family: var(--font-body); }
+textarea { width: 100%; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); resize: vertical; }
+textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tag { font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 99px; background: var(--sunken); color: var(--muted); }
+.tag.buy { background: var(--accent); color: var(--accent-fg); }
+input:disabled { opacity: 0.55; }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.check input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.hint { font-size: 12.5px; color: var(--muted); margin: 0; }
+.hint b { color: var(--fg); font-family: var(--font-mono); font-weight: 600; }
+button.reset { font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; justify-self: start; }
+button.reset:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Результати */
+.out { display: grid; gap: 28px; min-width: 0; }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.stat { padding: 14px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -1px -1px 0; display: grid; gap: 2px; align-content: start; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font-family: var(--font-mono); font-weight: 600; font-size: 20px; font-variant-numeric: tabular-nums; }
+.stat .s { font-size: 12.5px; color: var(--muted); }
+section { display: grid; gap: 12px; min-width: 0; }
+h2 { font-size: 17px; font-weight: 700; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0; font-size: 13.5px; max-width: 70ch; }
+.warn { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin: 0; }
+.split { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 20px; align-items: center; }
+@media (max-width: 640px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 0; padding: 0; list-style: none; }
+.legend li { display: flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.sheets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.sheets.wide { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; }
+figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
+figcaption { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+figcaption b { color: var(--fg); font-weight: 600; }
+svg { display: block; width: 100%; height: auto; max-width: 100%; }
+svg.iso { max-height: 300px; }
+.view3d { height: 360px; border: 1px solid var(--night); border-radius: 10px; background: var(--night); overflow: hidden; position: relative; }
+.view3d canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.view3d canvas:active { cursor: grabbing; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+button.primary { font: inherit; font-weight: 600; font-size: 14px; padding: 9px 14px; border-radius: 6px; border: 0; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+button.primary:hover { filter: brightness(1.08); }
+button.lamp { font: inherit; font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+button.lamp[aria-pressed="true"] { background: var(--f-top); border-color: var(--f-top); color: var(--on-chip); }
+input[type="color"] { width: 100%; height: 34px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.formula { font-family: var(--font-mono); font-size: 13.5px; margin: 0; overflow-x: auto; white-space: nowrap; }
+svg text { font-family: var(--font-mono); font-weight: 600; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+td.n, th.n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+td .sw { display: inline-block; vertical-align: -1px; margin-right: 6px; }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>Розкрій мозаїчного світильника</h1>
+    <p>Задайте розмір світильника в чіпах мозаїки. Сервіс розкладе 5 граней по листах мозаїки та порахує деталі з оргскла.</p>
+  </header>
+
+  <div class="cols">
+    <form class="panel" id="form" autocomplete="off">
+      <fieldset>
+        <legend>Світильник, у чіпах</legend>
+        <div class="row">
+          <label class="f"><span>Ширина</span><input type="number" id="W" min="1" max="60" step="1"></label>
+          <label class="f"><span>Глибина</span><input type="number" id="D" min="1" max="60" step="1"></label>
+          <label class="f"><span>Висота</span><input type="number" id="H" min="1" max="60" step="1"></label>
+        </div>
+        <label class="check"><input type="checkbox" id="cube"> Куб, усі сторони однакові</label>
+        <div class="row two">
+          <label class="f"><span>Кількість світильників</span><input type="number" id="qty" min="1" max="50" step="1"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Мозаїка</legend>
+        <div class="row">
+          <label class="f"><span>Чіп, мм</span><input type="number" id="chip" min="1" max="200" step="0.1"></label>
+          <label class="f"><span>Товщина, мм</span><input type="number" id="tm" min="0" max="20" step="0.1"></label>
+          <label class="f"><span>Колір</span><input type="color" id="mcolor"></label>
+        </div>
+        <div class="row two">
+          <label class="f"><span>Шов на листі, мм</span><input type="number" id="sheetGap" min="0" max="20" step="0.1"></label>
+          <label class="f"><span>Шов на виробі, мм</span><input type="number" id="gap" min="0" max="20" step="0.1"></label>
+        </div>
+        <div class="row">
+          <label class="f"><span>Чіпів у ряду</span><input type="number" id="cols" min="1" max="40" step="1"></label>
+          <label class="f"><span>Рядів</span><input type="number" id="rows" min="1" max="40" step="1"></label>
+          <label class="f"><span>Ціна листа, грн</span><input type="number" id="priceM" min="0" step="1"></label>
+        </div>
+        <p class="hint" id="sheetHint"></p>
+        <label class="check"><input type="checkbox" id="split"> Складати грань із залишків</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Оргскло</legend>
+        <div class="row">
+          <label class="f"><span>Товщина, мм</span><input type="number" id="ta" min="0.5" max="20" step="0.1"></label>
+          <label class="f"><span>Припуск на кут, мм</span><input type="number" id="edge" min="-20" max="50" step="0.1"></label>
+          <label class="f"><span>Відступ знизу, мм</span><input type="number" id="bottom" min="0" max="200" step="0.1"></label>
+        </div>
+        <label class="f"><span>Кришка</span>
+          <select id="lid">
+            <option value="on">Лежить зверху на стінках</option>
+            <option value="in">Вставлена між стінками</option>
+          </select>
+        </label>
+        <label class="f"><span>Стик стінок</span>
+          <select id="walls">
+            <option value="fb">Передня й задня накривають бокові</option>
+            <option value="pin">По колу, кожна накриває сусідню</option>
+          </select>
+        </label>
+        <div class="row two">
+          <label class="f"><span>Різ, мм</span><input type="number" id="kerf" min="0" max="10" step="0.1"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Листи оргскла</legend>
+        <p class="hint">Уже куплений лист використовується першим і в ціну не входить.</p>
+        <div class="row">
+          <label class="f"><span>Куплений, ширина</span><input type="number" id="ownW" min="10" max="4000" step="1"></label>
+          <label class="f"><span>Висота</span><input type="number" id="ownH" min="10" max="4000" step="1"></label>
+          <label class="f"><span>Штук</span><input type="number" id="ownN" min="0" max="20" step="1"></label>
+        </div>
+        <label class="f"><span>Формати в продажу: ширина, висота, ціна в грн</span>
+          <textarea id="catalog" rows="10" spellcheck="false"></textarea>
+        </label>
+        <button type="button" class="reset" id="reset">Скинути до типових</button>
+      </fieldset>
+    </form>
+
+    <div class="out" id="out"></div>
+  </div>
+</div>
+
+<script>
+// <logic>
+var FACE_DEFS = [
+  { key: 'top',   code: 'В',  name: 'Верх' },
+  { key: 'front', code: 'П',  name: 'Перед' },
+  { key: 'back',  code: 'З',  name: 'Зад' },
+  { key: 'left',  code: 'Л',  name: 'Ліва' },
+  { key: 'right', code: 'Пр', name: 'Права' }
+];
+
+function span(n, p) { return n * p.chip + (n - 1) * p.gap; }
+
+// Грані в чіпах: h рядів × w стовпців
+function buildFaces(p) {
+  var faces = [];
+  for (var l = 1; l <= p.qty; l++) {
+    FACE_DEFS.forEach(function (d) {
+      var h, w;
+      if (d.key === 'top') { h = p.D; w = p.W; }
+      else if (d.key === 'front' || d.key === 'back') { h = p.H; w = p.W; }
+      else { h = p.H; w = p.D; }
+      faces.push({ id: faces.length, key: d.key, name: d.name, lamp: l,
+        code: (p.qty > 1 ? l + '·' : '') + d.code, h: h, w: w, pieces: [] });
+    });
+  }
+  return faces;
+}
+
+// ---- Розкрій мозаїки на цілочисельній сітці чіпів ----
+function newSheet(R, C) {
+  return { R: R, C: C, grid: new Uint8Array(R * C), ps: new Int32Array((R + 1) * (C + 1)), free: R * C, pieces: [] };
+}
+function rebuildPs(s) {
+  var R = s.R, C = s.C, W = C + 1;
+  for (var r = 1; r <= R; r++) for (var c = 1; c <= C; c++)
+    s.ps[r * W + c] = s.grid[(r - 1) * C + c - 1] + s.ps[(r - 1) * W + c] + s.ps[r * W + c - 1] - s.ps[(r - 1) * W + c - 1];
+}
+function occupied(s, r, c, h, w) {
+  var W = s.C + 1;
+  return s.ps[(r + h) * W + c + w] - s.ps[r * W + c + w] - s.ps[(r + h) * W + c] + s.ps[r * W + c];
+}
+function cellBusy(s, r, c) {
+  return r < 0 || c < 0 || r >= s.R || c >= s.C || s.grid[r * s.C + c] === 1;
+}
+function contact(s, r, c, h, w) {
+  var n = 0, i;
+  for (i = 0; i < w; i++) { if (cellBusy(s, r - 1, c + i)) n++; if (cellBusy(s, r + h, c + i)) n++; }
+  for (i = 0; i < h; i++) { if (cellBusy(s, r + i, c - 1)) n++; if (cellBusy(s, r + i, c + w)) n++; }
+  return n;
+}
+function findSpot(s, h, w) {
+  if (h > s.R || w > s.C || h * w > s.free) return null;
+  var best = null;
+  for (var r = 0; r + h <= s.R; r++) for (var c = 0; c + w <= s.C; c++) {
+    if (occupied(s, r, c, h, w) !== 0) continue;
+    var sc = contact(s, r, c, h, w);
+    if (!best || sc > best.score) best = { r: r, c: c, h: h, w: w, score: sc };
+  }
+  return best;
+}
+function findSpotAny(s, h, w) {
+  var a = findSpot(s, h, w);
+  if (h === w) return a;
+  var b = findSpot(s, w, h);
+  if (a && b) return b.score > a.score ? b : a;
+  return a || b;
+}
+function placePiece(sheets, si, spot, face, fr, fc, fh, fw) {
+  var s = sheets[si];
+  for (var r = spot.r; r < spot.r + spot.h; r++) for (var c = spot.c; c < spot.c + spot.w; c++) s.grid[r * s.C + c] = 1;
+  s.free -= spot.h * spot.w;
+  rebuildPs(s);
+  var piece = { face: face, sheet: si, r: spot.r, c: spot.c, h: spot.h, w: spot.w,
+    fr: fr, fc: fc, fh: fh, fw: fw, rotated: fh !== fw && spot.h === fw && spot.w === fh };
+  s.pieces.push(piece);
+  face.pieces.push(piece);
+}
+function cover(sheets, face, fr, fc, rh, rw) {
+  if (rh <= 0 || rw <= 0) return true;
+  var cands = [];
+  for (var p = 1; p <= rh; p++) for (var q = 1; q <= rw; q++)
+    cands.push({ p: p, q: q, a: p * q, full: (p === rh ? 1 : 0) + (q === rw ? 1 : 0) });
+  cands.sort(function (x, y) { return y.a - x.a || y.full - x.full; });
+  for (var i = 0; i < cands.length; i++) {
+    var k = cands[i];
+    for (var si = 0; si < sheets.length; si++) {
+      var spot = findSpotAny(sheets[si], k.p, k.q);
+      if (!spot) continue;
+      placePiece(sheets, si, spot, face, fr, fc, k.p, k.q);
+      return cover(sheets, face, fr, fc + k.q, k.p, rw - k.q) &&
+             cover(sheets, face, fr + k.p, fc, rh - k.p, rw);
+    }
+  }
+  return false;
+}
+function tryPack(faces, R, C, N, allowSplit) {
+  var sheets = [], i;
+  for (i = 0; i < N; i++) sheets.push(newSheet(R, C));
+  faces.forEach(function (f) { f.pieces = []; });
+  var order = faces.slice().sort(function (a, b) { return b.h * b.w - a.h * a.w || a.id - b.id; });
+  var later = [];
+  for (i = 0; i < order.length; i++) {
+    var f = order[i], done = false;
+    for (var si = 0; si < N && !done; si++) {
+      var spot = findSpotAny(sheets[si], f.h, f.w);
+      if (spot) { placePiece(sheets, si, spot, f, 0, 0, f.h, f.w); done = true; }
+    }
+    if (done) continue;
+    var oversized = !((f.h <= R && f.w <= C) || (f.w <= R && f.h <= C));
+    if (allowSplit || oversized) later.push(f); else return null;
+  }
+  for (i = 0; i < later.length; i++) if (!cover(sheets, later[i], 0, 0, later[i].h, later[i].w)) return null;
+  return sheets;
+}
+function packMosaic(faces, R, C, allowSplit) {
+  var total = faces.reduce(function (s, f) { return s + f.h * f.w; }, 0);
+  var lower = Math.max(1, Math.ceil(total / (R * C)));
+  for (var N = lower; N <= lower + faces.length + 5; N++) {
+    var sheets = tryPack(faces, R, C, N, allowSplit);
+    if (sheets) return { sheets: sheets, total: total, left: N * R * C - total };
+  }
+  return null;
+}
+
+// ---- Оргскло ----
+function acrylicParts(p) {
+  var Aw = span(p.W, p) + 2 * p.edge, Ad = span(p.D, p) + 2 * p.edge, Ah = span(p.H, p) + p.edge + p.bottom;
+  var hw = p.lid === 'on' ? Ah - p.ta : Ah;
+  var lidW = p.lid === 'on' ? Aw : Aw - 2 * p.ta, lidD = p.lid === 'on' ? Ad : Ad - 2 * p.ta;
+  var fbW = p.walls === 'fb' ? Aw : Aw - p.ta, lrW = p.walls === 'fb' ? Ad - 2 * p.ta : Ad - p.ta;
+  var one = [
+    { key: 'top', name: 'Кришка', w: lidW, h: lidD },
+    { key: 'front', name: 'Перед', w: fbW, h: hw },
+    { key: 'back', name: 'Зад', w: fbW, h: hw },
+    { key: 'left', name: 'Ліва', w: lrW, h: hw },
+    { key: 'right', name: 'Права', w: lrW, h: hw }
+  ];
+  var parts = [];
+  for (var l = 1; l <= p.qty; l++) one.forEach(function (o) {
+    parts.push({ key: o.key, name: o.name, lamp: l, w: o.w, h: o.h });
+  });
+  return { Aw: Aw, Ad: Ad, Ah: Ah, one: one, parts: parts };
+}
+function placeInBin(bin, it, kerf) {
+  var EPS = 1e-6, best = null;
+  [[it.w, it.h, false], [it.h, it.w, true]].forEach(function (o, oi) {
+    if (oi === 1 && it.w === it.h) return;
+    var w = o[0] + kerf, h = o[1] + kerf;
+    bin.free.forEach(function (fr) {
+      if (fr.w + EPS < w || fr.h + EPS < h) return;
+      var sc = Math.min(fr.w - w, fr.h - h);
+      if (!best || sc < best.sc - EPS || (Math.abs(sc - best.sc) <= EPS && (fr.y < best.y || (fr.y === best.y && fr.x < best.x))))
+        best = { sc: sc, x: fr.x, y: fr.y, w: w, h: h, rot: o[2] };
+    });
+  });
+  if (!best) return false;
+  var next = [];
+  bin.free.forEach(function (fr) {
+    if (best.x >= fr.x + fr.w - EPS || best.x + best.w <= fr.x + EPS || best.y >= fr.y + fr.h - EPS || best.y + best.h <= fr.y + EPS) { next.push(fr); return; }
+    if (best.x > fr.x + EPS) next.push({ x: fr.x, y: fr.y, w: best.x - fr.x, h: fr.h });
+    if (best.x + best.w < fr.x + fr.w - EPS) next.push({ x: best.x + best.w, y: fr.y, w: fr.x + fr.w - best.x - best.w, h: fr.h });
+    if (best.y > fr.y + EPS) next.push({ x: fr.x, y: fr.y, w: fr.w, h: best.y - fr.y });
+    if (best.y + best.h < fr.y + fr.h - EPS) next.push({ x: fr.x, y: best.y + best.h, w: fr.w, h: fr.y + fr.h - best.y - best.h });
+  });
+  bin.free = next.filter(function (a, i) {
+    return !next.some(function (b, j) {
+      return i !== j && a.x >= b.x - EPS && a.y >= b.y - EPS && a.x + a.w <= b.x + b.w + EPS && a.y + a.h <= b.y + b.h + EPS &&
+        (j < i || !(b.x >= a.x - EPS && b.y >= a.y - EPS && b.x + b.w <= a.x + a.w + EPS && b.y + b.h <= a.y + a.h + EPS));
+    });
+  });
+  bin.items.push({ part: it, x: best.x, y: best.y, w: best.w - kerf, h: best.h - kerf, rot: best.rot });
+  return true;
+}
+var PART_ORDERS = [
+  function (a, b) { return Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w * b.h - a.w * a.h; },
+  function (a, b) { return b.w * b.h - a.w * a.h; },
+  function (a, b) { return Math.min(b.w, b.h) - Math.min(a.w, a.h) || b.w * b.h - a.w * a.h; }
+];
+function packInto(parts, sheets, kerf, order) {
+  var bins = sheets.map(function (sh) { return { W: sh.w, H: sh.h, sheet: sh, free: [{ x: 0, y: 0, w: sh.w + kerf, h: sh.h + kerf }], items: [] }; });
+  var unplaced = [];
+  parts.slice().sort(order).forEach(function (it) {
+    for (var i = 0; i < bins.length; i++) if (placeInBin(bins[i], it, kerf)) return;
+    unplaced.push(it);
+  });
+  return { bins: bins, unplaced: unplaced };
+}
+// Куплені листи йдуть першими, далі докуплені: спершу менші, потім навпаки
+function packBest(parts, sheets, kerf) {
+  var best = null;
+  var own = sheets.filter(function (x) { return x.owned; }), buy = sheets.filter(function (x) { return !x.owned; });
+  var asc = buy.slice().sort(function (a, b) { return a.w * a.h - b.w * b.h; });
+  var orders = [own.concat(asc), own.concat(asc.slice().reverse())];
+  if (buy.length && own.length) orders.push(asc.concat(own));
+  for (var oi = 0; oi < orders.length; oi++) for (var pi = 0; pi < PART_ORDERS.length; pi++) {
+    var r = packInto(parts, orders[oi], kerf, PART_ORDERS[pi]);
+    if (!r.unplaced.length) return r;
+    if (!best || r.unplaced.length < best.unplaced.length) best = r;
+  }
+  return best || { bins: [], unplaced: parts.slice() };
+}
+function parseCatalog(text) {
+  var out = [];
+  String(text || '').split(/\n/).forEach(function (line) {
+    var m = line.replace(/,/g, '.').match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)/);
+    if (!m) return;
+    var w = parseFloat(m[1]), h = parseFloat(m[2]), price = parseFloat(m[3]);
+    if (w > 0 && h > 0) out.push({ w: w, h: h, price: price });
+  });
+  return out;
+}
+function fitsSheet(it, sh) { return (it.w <= sh.w + 1e-6 && it.h <= sh.h + 1e-6) || (it.h <= sh.w + 1e-6 && it.w <= sh.h + 1e-6); }
+// Підбір листів: спершу куплені, далі найдешевший набір із каталогу
+function chooseSheets(allParts, owned, catalog, kerf) {
+  var all = owned.concat(catalog), impossible = [], parts = [];
+  allParts.forEach(function (it) {
+    if (!(it.w > 0 && it.h > 0) || !all.some(function (sh) { return fitsSheet(it, sh); })) impossible.push(it); else parts.push(it);
+  });
+  function done(r, bought) {
+    return { bins: r.bins, bought: bought, cost: bought.reduce(function (a, b) { return a + b.price; }, 0), unplaced: impossible.concat(r.unplaced) };
+  }
+  var r0 = packBest(parts, owned, kerf);
+  if (!r0.unplaced.length || !catalog.length) return done(r0, []);
+
+  var fixed = [], rest = parts;
+  var value = catalog.slice().sort(function (a, b) { return a.price / (a.w * a.h) - b.price / (b.w * b.h); });
+  function area(list) { return list.reduce(function (a, x) { return a + x.w * x.h; }, 0); }
+  var ownArea = area(owned), guard = 0;
+  // Великі замовлення: спершу набираємо листи з найкращою ціною за площу
+  while (area(rest) - ownArea > 3 * value[0].w * value[0].h && guard++ < 200) {
+    var one = packInto(rest, [value[0]], kerf, PART_ORDERS[0]);
+    if (!one.bins[0].items.length) break;
+    fixed.push(one.bins[0]);
+    rest = one.unplaced;
+  }
+  var need = area(rest), combos = [], n = catalog.length;
+  (function gen(start, cur, cost, ar) {
+    if (cur.length && ar + ownArea >= need) combos.push({ list: cur.slice(), cost: cost });
+    if (cur.length >= 4) return;
+    for (var i = start; i < n; i++) { cur.push(catalog[i]); gen(i, cur, cost + catalog[i].price, ar + catalog[i].w * catalog[i].h); cur.pop(); }
+  })(0, [], 0, 0);
+  combos.sort(function (a, b) { return a.cost - b.cost || a.list.length - b.list.length; });
+  var found = null, fallback = null;
+  for (var c = 0; c < combos.length && c < 600; c++) {
+    var r = packBest(rest, owned.concat(combos[c].list), kerf);
+    if (!r.unplaced.length) { found = { r: r, bought: combos[c].list }; break; }
+  }
+  if (!found) {
+    var list = [], rr = null;
+    for (var k = 0; k < 60; k++) {
+      list.push(value[0]);
+      rr = packBest(rest, owned.concat(list), kerf);
+      if (!rr.unplaced.length) break;
+    }
+    found = { r: rr, bought: list };
+  }
+  var res = done({ bins: fixed.concat(found.r.bins), unplaced: found.r.unplaced },
+    fixed.map(function (b) { return b.sheet; }).concat(found.bought));
+  return res;
+}
+function maxLamps(p, owned, kerf) {
+  if (!owned.length) return 0;
+  for (var q = 1; q <= 40; q++) {
+    var parts = acrylicParts(Object.assign({}, p, { qty: q })).parts;
+    if (parts.some(function (x) { return !(x.w > 0 && x.h > 0); })) return 0;
+    if (packBest(parts, owned, kerf).unplaced.length) return q - 1;
+  }
+  return 40;
+}
+
+// ---- 3D-модель: список коробок у мм (x ширина, y глибина, z висота; перед на -y, дно z=0) ----
+function modelBoxes(p) {
+  var a = acrylicParts(p), Aw = a.Aw, Ad = a.Ad, Ah = a.Ah, t = p.ta, b = [];
+  var hw = p.lid === 'on' ? Ah - t : Ah;
+  function ac(name, cx, cy, cz, sx, sy, sz) { b.push({ kind: 'acryl', name: name, c: [cx, cy, cz], s: [sx, sy, sz] }); }
+  if (p.lid === 'on') ac('lid', 0, 0, Ah - t / 2, Aw, Ad, t); else ac('lid', 0, 0, Ah - t / 2, Aw - 2 * t, Ad - 2 * t, t);
+  if (p.walls === 'fb') {
+    ac('front', 0, -Ad / 2 + t / 2, hw / 2, Aw, t, hw);
+    ac('back', 0, Ad / 2 - t / 2, hw / 2, Aw, t, hw);
+    ac('left', -Aw / 2 + t / 2, 0, hw / 2, t, Ad - 2 * t, hw);
+    ac('right', Aw / 2 - t / 2, 0, hw / 2, t, Ad - 2 * t, hw);
+  } else {
+    ac('front', -t / 2, -Ad / 2 + t / 2, hw / 2, Aw - t, t, hw);
+    ac('back', t / 2, Ad / 2 - t / 2, hw / 2, Aw - t, t, hw);
+    ac('left', -Aw / 2 + t / 2, t / 2, hw / 2, t, Ad - t, hw);
+    ac('right', Aw / 2 - t / 2, -t / 2, hw / 2, t, Ad - t, hw);
+  }
+  var c = p.chip, pitch = p.chip + p.gap, m = p.tm, i, j;
+  function ch(face, cx, cy, cz, sx, sy, sz) { b.push({ kind: 'chip', name: face, c: [cx, cy, cz], s: [sx, sy, sz] }); }
+  function u(A, k) { return -A / 2 + p.edge + k * pitch + c / 2; }
+  function z(k) { return Ah - p.edge - k * pitch - c / 2; }
+  if (m > 0) {
+    for (i = 0; i < p.W; i++) for (j = 0; j < p.D; j++) ch('top', u(Aw, i), u(Ad, j), Ah + m / 2, c, c, m);
+    for (i = 0; i < p.W; i++) for (j = 0; j < p.H; j++) ch('front', u(Aw, i), -Ad / 2 - m / 2, z(j), c, m, c);
+    for (i = 0; i < p.W; i++) for (j = 0; j < p.H; j++) ch('back', u(Aw, i), Ad / 2 + m / 2, z(j), c, m, c);
+    for (i = 0; i < p.D; i++) for (j = 0; j < p.H; j++) ch('left', -Aw / 2 - m / 2, u(Ad, i), z(j), m, c, c);
+    for (i = 0; i < p.D; i++) for (j = 0; j < p.H; j++) ch('right', Aw / 2 + m / 2, u(Ad, i), z(j), m, c, c);
+  }
+  return b;
+}
+var BOX_QUADS = [[0, 4, 6, 2], [1, 3, 7, 5], [0, 1, 5, 4], [2, 6, 7, 3], [0, 2, 3, 1], [4, 5, 7, 6]];
+var BOX_NORMALS = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+function boxVerts(bx) {
+  var v = [];
+  for (var k = 0; k < 8; k++) v.push([
+    bx.c[0] + (k & 1 ? 0.5 : -0.5) * bx.s[0],
+    bx.c[1] + (k & 2 ? 0.5 : -0.5) * bx.s[1],
+    bx.c[2] + (k & 4 ? 0.5 : -0.5) * bx.s[2]]);
+  return v;
+}
+function r3(x) { return String(Math.round(x * 1000) / 1000); }
+function toOBJ(boxes, mtlName) {
+  var out = ['# Units: mm, Z up', 'mtllib ' + mtlName], n = 0, last = '';
+  boxes.forEach(function (bx) {
+    var tag = (bx.kind === 'acryl' ? 'acryl_' : 'mosaic_') + bx.name;
+    if (tag !== last) { out.push('o ' + tag, 'usemtl ' + (bx.kind === 'acryl' ? 'acryl' : 'mosaic')); last = tag; }
+    boxVerts(bx).forEach(function (v) { out.push('v ' + r3(v[0]) + ' ' + r3(v[1]) + ' ' + r3(v[2])); });
+    BOX_QUADS.forEach(function (q) { out.push('f ' + q.map(function (k) { return n + k + 1; }).join(' ')); });
+    n += 8;
+  });
+  return out.join('\n') + '\n';
+}
+function toSTL(boxes) {
+  var buf = new ArrayBuffer(84 + boxes.length * 12 * 50), dv = new DataView(buf), o = 84;
+  dv.setUint32(80, boxes.length * 12, true);
+  boxes.forEach(function (bx) {
+    var v = boxVerts(bx);
+    BOX_QUADS.forEach(function (q, qi) {
+      [[q[0], q[1], q[2]], [q[0], q[2], q[3]]].forEach(function (tri) {
+        var k;
+        for (k = 0; k < 3; k++) dv.setFloat32(o + k * 4, BOX_NORMALS[qi][k], true);
+        tri.forEach(function (vi, ti) { for (k = 0; k < 3; k++) dv.setFloat32(o + 12 + ti * 12 + k * 4, v[vi][k], true); });
+        o += 50;
+      });
+    });
+  });
+  return new Uint8Array(buf);
+}
+var CRC_T = (function () {
+  var t = [], c;
+  for (var n = 0; n < 256; n++) { c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(u8) {
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  var enc = new TextEncoder(), parts = [], central = [], off = 0, cdSize = 0;
+  files.forEach(function (f) {
+    var nm = enc.encode(f.name), crc = crc32(f.data), len = f.data.length;
+    var h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint16(12, 0x21, true); h.setUint32(14, crc, true); h.setUint32(18, len, true); h.setUint32(22, len, true);
+    h.setUint16(26, nm.length, true);
+    parts.push(new Uint8Array(h.buffer), nm, f.data);
+    var c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+    c.setUint16(14, 0x21, true); c.setUint32(16, crc, true); c.setUint32(20, len, true); c.setUint32(24, len, true);
+    c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), nm);
+    off += 30 + nm.length + len; cdSize += 46 + nm.length;
+  });
+  var e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+  e.setUint32(12, cdSize, true); e.setUint32(16, off, true);
+  var all = parts.concat(central, [new Uint8Array(e.buffer)]);
+  var out = new Uint8Array(off + cdSize + 22), pos = 0;
+  all.forEach(function (u) { out.set(u, pos); pos += u.length; });
+  return out;
+}
+function hexRgb(h) {
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h) || [0, 'f2', '69', '2e'];
+  return [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255];
+}
+function modelZip(p) {
+  var enc = new TextEncoder(), boxes = modelBoxes(p), rgb = hexRgb(p.mcolor).map(r3).join(' ');
+  var mtl = 'newmtl acryl\nKd 0.92 0.96 1\nd 0.35\n\nnewmtl mosaic\nKd ' + rgb + '\nd 1\n';
+  var info = 'Svitylnyk ' + p.W + 'x' + p.D + 'x' + p.H + ' chips. Units: mm, Z up, bottom open.\n' +
+    'lamp.obj + lamp.mtl - full model (acrylic panels and mosaic faces as separate objects)\n' +
+    'acryl.stl - acrylic box only\nmosaic.stl - mosaic chips only\n';
+  return zipStore([
+    { name: 'lamp.obj', data: enc.encode(toOBJ(boxes, 'lamp.mtl')) },
+    { name: 'lamp.mtl', data: enc.encode(mtl) },
+    { name: 'acryl.stl', data: toSTL(boxes.filter(function (x) { return x.kind === 'acryl'; })) },
+    { name: 'mosaic.stl', data: toSTL(boxes.filter(function (x) { return x.kind === 'chip'; })) },
+    { name: 'readme.txt', data: enc.encode(info) }
+  ]);
+}
+// </logic>
+
+// ---- Інтерфейс ----
+var DEFAULTS = { W: 5, D: 5, H: 5, cube: true, qty: 1, chip: 25, gap: 5, sheetGap: 5, tm: 4, mcolor: '#f2692e', cols: 12, rows: 12, priceM: 0,
+  split: true, ta: 2, edge: 0, bottom: 0, lid: 'on', walls: 'fb', kerf: 0.2, ownW: 800, ownH: 500, ownN: 1,
+  catalog: '150 300 100\n300 300 190\n300 500 315\n400 500 405\n500 500 465\n600 500 535\n800 500 685\n500 1000 815\n500 1500 1190\n1000 1000 1480' };
+var INT = { W: 1, D: 1, H: 1, qty: 1, cols: 1, rows: 1, ownN: 1 };
+var KEY = 'mosaic-lamp-v5';
+var $ = function (id) { return document.getElementById(id); };
+var nf = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
+function mm(x) { return nf.format(Math.round(x * 10) / 10); }
+function color(key) { return 'var(--f-' + key + ')'; }
+
+function load() {
+  var p = Object.assign({}, DEFAULTS);
+  try { Object.assign(p, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
+  return p;
+}
+function save(p) { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch (e) {} }
+function fill(p) {
+  Object.keys(DEFAULTS).forEach(function (k) {
+    var el = $(k);
+    if (el.type === 'checkbox') el.checked = !!p[k]; else el.value = p[k];
+  });
+}
+function read() {
+  var p = {};
+  Object.keys(DEFAULTS).forEach(function (k) {
+    var el = $(k);
+    if (el.type === 'checkbox') { p[k] = el.checked; return; }
+    if (el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.type === 'color') { p[k] = el.value; return; }
+    var v = parseFloat(el.value);
+    if (!isFinite(v)) v = DEFAULTS[k];
+    var lo = parseFloat(el.min), hi = parseFloat(el.max);
+    if (isFinite(lo) && v < lo) v = lo;
+    if (isFinite(hi) && v > hi) v = hi;
+    if (INT[k]) v = Math.round(v);
+    p[k] = v;
+  });
+  if (p.cube) { p.D = p.W; p.H = p.W; }
+  return p;
+}
+
+function chipsSvg(rows, cols, p, cellFill) {
+  var pitch = p.chip + p.gap, rx = Math.min(1.5, p.chip * 0.08), s = '';
+  for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++)
+    s += '<rect x="' + (c * pitch) + '" y="' + (r * pitch) + '" width="' + p.chip + '" height="' + p.chip + '" rx="' + rx + '" fill="' + cellFill(r, c) + '"/>';
+  return s;
+}
+function pieceLabel(piece) {
+  return piece.face.code + (piece.face.pieces.length > 1 ? '-' + (piece.face.pieces.indexOf(piece) + 1) : '');
+}
+function outline(r, c, h, w, p, label, key) {
+  var pitch = p.chip + p.gap, x = c * pitch - p.gap / 2, y = r * pitch - p.gap / 2;
+  var pw = w * pitch, ph = h * pitch;
+  var fs = Math.max(5, Math.min(ph * 0.55, pw / (label.length * 0.62 + 0.6), pitch * 1.1));
+  return '<rect x="' + x + '" y="' + y + '" width="' + pw + '" height="' + ph + '" fill="none" stroke="var(--fg)" stroke-width="' + Math.max(1, p.gap * 0.6) + '"/>' +
+    '<text x="' + (x + pw / 2) + '" y="' + (y + ph / 2) + '" font-size="' + fs + '" text-anchor="middle" dominant-baseline="central" fill="var(--on-chip)" stroke="' + color(key) + '" stroke-width="' + fs * 0.25 + '" paint-order="stroke" stroke-linejoin="round">' + label + '</text>';
+}
+function sheetSvg(s, p0) {
+  var p = Object.assign({}, p0, { gap: p0.sheetGap });
+  var pad = p.gap + 2, w = span(s.C, p), h = span(s.R, p);
+  var owner = {};
+  s.pieces.forEach(function (pc) {
+    for (var r = pc.r; r < pc.r + pc.h; r++) for (var c = pc.c; c < pc.c + pc.w; c++) owner[r + ':' + c] = pc.face.key;
+  });
+  var svg = '<svg viewBox="' + (-pad) + ' ' + (-pad) + ' ' + (w + 2 * pad) + ' ' + (h + 2 * pad) + '" role="img" aria-label="Лист мозаїки">' +
+    '<rect x="' + (-pad) + '" y="' + (-pad) + '" width="' + (w + 2 * pad) + '" height="' + (h + 2 * pad) + '" rx="3" fill="var(--grout)"/>' +
+    chipsSvg(s.R, s.C, p, function (r, c) { var k = owner[r + ':' + c]; return k ? color(k) : 'var(--chip-free)'; });
+  s.pieces.forEach(function (pc) { svg += outline(pc.r, pc.c, pc.h, pc.w, p, pieceLabel(pc), pc.face.key); });
+  return svg + '</svg>';
+}
+function faceSvg(f, p) {
+  var pad = p.gap + 2, w = span(f.w, p), h = span(f.h, p);
+  var svg = '<svg viewBox="' + (-pad) + ' ' + (-pad) + ' ' + (w + 2 * pad) + ' ' + (h + 2 * pad) + '" role="img" aria-label="Схема складання грані">' +
+    '<rect x="' + (-pad) + '" y="' + (-pad) + '" width="' + (w + 2 * pad) + '" height="' + (h + 2 * pad) + '" rx="3" fill="var(--grout)"/>' +
+    chipsSvg(f.h, f.w, p, function () { return color(f.key); });
+  f.pieces.forEach(function (pc) { svg += outline(pc.fr, pc.fc, pc.fh, pc.fw, p, pieceLabel(pc), f.key); });
+  return svg + '</svg>';
+}
+function isoSvg(p, a) {
+  var cs = Math.cos(Math.PI / 6), sn = 0.5, e = p.edge;
+  var x1 = a.Aw * cs, y1 = a.Aw * sn;
+  var minY = -a.Ad * sn, maxY = y1 + a.Ah, maxX = (a.Aw + a.Ad) * cs, pad = 6;
+  function face(m, fw, fh, rows, cols, key, offY) {
+    return '<g transform="matrix(' + m.join(',') + ')"><rect width="' + fw + '" height="' + fh + '" fill="var(--grout)"/>' +
+      '<g transform="translate(' + e + ',' + offY + ')">' + chipsSvg(rows, cols, p, function () { return color(key); }) + '</g></g>';
+  }
+  return '<svg class="iso" viewBox="' + (-pad) + ' ' + (minY - pad) + ' ' + (maxX + 2 * pad) + ' ' + (maxY - minY + 2 * pad) + '" role="img" aria-label="Вигляд світильника">' +
+    face([cs, sn, cs, -sn, 0, 0], a.Aw, a.Ad, p.D, p.W, 'top', e) +
+    face([cs, sn, 0, 1, 0, 0], a.Aw, a.Ah, p.H, p.W, 'front', e) +
+    face([cs, -sn, 0, 1, x1, y1], a.Ad, a.Ah, p.H, p.D, 'right', e) + '</svg>';
+}
+function binSvg(bin, p) {
+  var svg = '<svg viewBox="-2 -2 ' + (bin.W + 4) + ' ' + (bin.H + 4) + '" role="img" aria-label="Лист оргскла">' +
+    '<rect width="' + bin.W + '" height="' + bin.H + '" fill="var(--acryl)" stroke="var(--line)" stroke-width="1.5"/>';
+  bin.items.forEach(function (it) {
+    var t1 = (p.qty > 1 ? it.part.lamp + '·' : '') + it.part.name, t2 = mm(it.part.w) + '×' + mm(it.part.h);
+    var fs = Math.max(4, Math.min(it.h * 0.22, it.w / (Math.max(t1.length, t2.length) * 0.66), bin.W * 0.045));
+    var cx = it.x + it.w / 2, cy = it.y + it.h / 2;
+    svg += '<rect x="' + it.x + '" y="' + it.y + '" width="' + it.w + '" height="' + it.h + '" fill="' + color(it.part.key) + '" fill-opacity="0.75" stroke="var(--fg)" stroke-width="1"/>' +
+      '<text x="' + cx + '" y="' + (cy - fs * 0.6) + '" font-size="' + fs + '" text-anchor="middle" dominant-baseline="central" fill="var(--on-chip)">' + t1 + '</text>' +
+      '<text x="' + cx + '" y="' + (cy + fs * 0.6) + '" font-size="' + fs + '" text-anchor="middle" dominant-baseline="central" fill="var(--on-chip)">' + t2 + '</text>';
+  });
+  return svg + '</svg>';
+}
+function stat(k, v, s) {
+  return '<div class="stat"><span class="k">' + k + '</span><span class="v">' + v + '</span>' + (s ? '<span class="s">' + s + '</span>' : '') + '</div>';
+}
+
+function render() {
+  var p = read();
+  $('D').disabled = $('H').disabled = p.cube;
+  if (p.cube) { $('D').value = p.W; $('H').value = p.W; }
+  save(p);
+  var ps = Object.assign({}, p, { gap: p.sheetGap });
+  $('sheetHint').innerHTML = 'У листі <b>' + p.cols + ' × ' + p.rows + '</b>, разом ' + (p.cols * p.rows) + ' чіпів.';
+
+  var faces = buildFaces(p);
+  var mos = packMosaic(faces, p.rows, p.cols, p.split);
+  var a = acrylicParts(p);
+  var owned = [];
+  for (var oi = 0; oi < p.ownN; oi++) owned.push({ w: p.ownW, h: p.ownH, price: 0, owned: true });
+  var catalog = parseCatalog(p.catalog);
+  var ac = chooseSheets(a.parts, owned, catalog, p.kerf);
+  ac.bins = ac.bins.filter(function (b) { return b.items.length; });
+  var fromOwned = maxLamps(p, owned, p.kerf);
+  function fmtSheet(sh) { return mm(sh.w) + ' × ' + mm(sh.h); }
+  var html = '';
+
+  // Підсумок
+  var cost = (mos ? mos.sheets.length * p.priceM : 0) + ac.cost;
+  html += '<div class="summary">' +
+    stat('Листів мозаїки', mos ? mos.sheets.length : '—', mos ? 'потрібно ' + mos.total + ' чіпів, залишок ' + mos.left : '') +
+    stat('Докупити оргскла', ac.bought.length ? nf.format(ac.cost) + ' грн' : '0 грн', ac.bought.length ? ac.bought.map(fmtSheet).join(', ') + ' мм' : (ac.unplaced.length ? 'деталі не влазять' : 'вистачає купленого листа')) +
+    (owned.length ? stat('З купленого листа', fromOwned + ' шт', 'світильників такого розміру з ' + fmtSheet(owned[0]) + (owned.length > 1 ? ' × ' + owned.length : '')) : '') +
+    stat('Габарит з мозаїкою', mm(a.Aw + 2 * p.tm) + ' × ' + mm(a.Ad + 2 * p.tm), 'висота ' + mm(a.Ah + p.tm) + ' мм') +
+    stat('Короб з оргскла', mm(a.Aw) + ' × ' + mm(a.Ad), 'висота ' + mm(a.Ah) + ' мм') +
+    (cost > 0 && p.priceM > 0 ? stat('Матеріали разом', nf.format(cost) + ' грн', 'мозаїка та докуплене оргскло') : '') +
+    '</div>';
+
+  // Вигляд
+  var legend = '<ul class="legend">' + FACE_DEFS.map(function (d) {
+    return '<li><span class="sw" style="background:' + color(d.key) + '"></span>' + d.code + ' — ' + d.name + '</li>';
+  }).join('') + '</ul>';
+  function formula(n) { return n + ' × ' + mm(p.chip) + ' + ' + (n - 1) + ' × ' + mm(p.gap) + ' = ' + mm(span(n, p)) + ' мм'; }
+  var dims = [['Ширина', p.W], ['Глибина', p.D], ['Висота', p.H]];
+  html += '<section><h2>Світильник ' + p.W + ' × ' + p.D + ' × ' + p.H + ' чіпів</h2>' +
+    (initView() ? '<div class="view3d" id="view3d"></div><div class="bar"><button type="button" class="lamp" id="light" aria-pressed="false">Увімкнути світло</button><button type="button" class="primary" id="dl">Завантажити 3D-модель (ZIP)</button>' +
+      '<span class="sub" id="dlMsg">OBJ і STL у міліметрах. Тягніть модель, щоб обертати, колесо наближає.</span></div>' : isoSvg(p, a)) +
+    '<div style="display:grid;gap:10px">' +
+    dims.map(function (d) { return '<p class="formula">' + d[0] + ': ' + formula(d[1]) + '</p>'; }).join('') +
+    '<p class="sub">Поле мозаїки на грані: ' + mm(span(p.W, p)) + ' × ' + mm(span(p.H, p)) + ' мм спереду, ' +
+    mm(span(p.D, p)) + ' × ' + mm(span(p.H, p)) + ' мм збоку. Мозаїка закінчується по краю оргскла, тому в кожному куті лишається паз ' +
+    mm(p.tm + p.edge) + ' × ' + mm(p.tm + p.edge) + ' мм під затирку. Дно відкрите.</p></div></section>';
+
+  // Мозаїка
+  html += '<section><h2>Розкрій мозаїки</h2>';
+  if (!mos) {
+    html += '<p class="warn">Не вдалося розкласти грані. Перевірте розмір листа.</p>';
+  } else {
+    var splitFaces = faces.filter(function (f) { return f.pieces.length > 1; });
+    if (Math.abs(p.gap - p.sheetGap) > 1e-6)
+      html += '<p class="warn">Шов на світильнику ' + mm(p.gap) + ' мм, а на сітці листа ' + mm(p.sheetGap) + ' мм. Шматок із листа не ляже на грань як є: чіпи треба зняти із сітки та клеїти по одному або смугами з кроком ' + mm(p.chip + p.gap) + ' мм. Схема показує, які чіпи з якого листа йдуть на яку грань.</p>';
+    html += '<p class="sub">Різати по швах сітки. Підпис на шматку: код грані' + (p.qty > 1 ? ' з номером світильника' : '') + ', після дефіса номер частини. Сірі чіпи лишаються.</p>';
+    if (!p.split && splitFaces.length) html += '<p class="warn">Частина граней більша за лист, тому вони зібрані з кількох шматків.</p>';
+    html += '<div class="sheets">' + mos.sheets.map(function (s, i) {
+      return '<figure>' + sheetSvg(s, p) + '<figcaption><b>Лист ' + (i + 1) + '</b><span>залишок ' + s.free + ' з ' + (s.R * s.C) + ' чіпів</span></figcaption></figure>';
+    }).join('') + '</div>';
+    if (splitFaces.length) {
+      html += '<h2>Складені грані</h2><p class="sub">Так шматки стають на грань. Стики йдуть по швах, після затирки їх не видно.</p><div class="faces">' +
+        splitFaces.map(function (f) {
+          return '<figure>' + faceSvg(f, p) + '<figcaption><b>' + f.code + ' — ' + f.name + '</b><span>' +
+            f.pieces.map(function (pc) { return pc.fh + '×' + pc.fw; }).join(' + ') + '</span></figcaption></figure>';
+        }).join('') + '</div>';
+    }
+    html += '<div class="tbl"><table><thead><tr><th>Шматок</th><th>Грань</th><th>Лист</th><th class="n">Чіпів</th><th class="n">Розмір, мм</th></tr></thead><tbody>' +
+      faces.map(function (f) {
+        return f.pieces.map(function (pc) {
+          return '<tr><td><span class="sw" style="background:' + color(f.key) + '"></span>' + pieceLabel(pc) + '</td><td>' + f.name +
+            (f.pieces.length > 1 ? ', частина' : '') + '</td><td>' + (pc.sheet + 1) + '</td><td class="n">' + pc.fh + ' × ' + pc.fw +
+            '</td><td class="n">' + mm(span(pc.fw, p)) + ' × ' + mm(span(pc.fh, p)) + '</td></tr>';
+        }).join('');
+      }).join('') + '</tbody></table></div>';
+  }
+  html += '</section>';
+
+  // Оргскло
+  html += '<section><h2>Деталі з оргскла</h2><p class="sub">Розміри на один світильник. Зовнішній розмір короба дорівнює полю мозаїки плюс припуск на кут з кожного боку.</p>';
+  if (a.one.some(function (o) { return !(o.w > 0 && o.h > 0); }))
+    html += '<p class="warn">Деталь виходить з нульовим або від’ємним розміром. Зменште товщину оргскла або збільште світильник.</p>';
+  var groups = [];
+  a.one.forEach(function (o) {
+    var g = groups.filter(function (x) { return Math.abs(x.w - o.w) < 1e-6 && Math.abs(x.h - o.h) < 1e-6; })[0];
+    if (g) { g.names.push(o.name); g.n++; } else groups.push({ w: o.w, h: o.h, names: [o.name], n: 1, key: o.key });
+  });
+  html += '<div class="tbl"><table><thead><tr><th>Деталь</th><th class="n">Ширина, мм</th><th class="n">Висота, мм</th><th class="n">На 1 шт</th><th class="n">Усього</th></tr></thead><tbody>' +
+    groups.map(function (g) {
+      return '<tr><td><span class="sw" style="background:' + color(g.key) + '"></span>' + g.names.join(', ') + '</td><td class="n">' + mm(g.w) +
+        '</td><td class="n">' + mm(g.h) + '</td><td class="n">' + g.n + '</td><td class="n">' + g.n * p.qty + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  if (ac.unplaced.length)
+    html += '<p class="warn">Не вдалося розмістити: ' +
+      ac.unplaced.map(function (u) { return u.name + ' ' + mm(u.w) + '×' + mm(u.h); }).join(', ') + '. ' +
+      (catalog.length ? 'Жоден формат зі списку не підходить.' : 'Додайте формати в продажу, щоб підібрати докупівлю.') + '</p>';
+  if (ac.bins.length) {
+    html += '<h2>Розкрій оргскла</h2><p class="sub">' + (ac.bought.length ? 'Найдешевший набір, у який влазять усі деталі: ' + ac.bought.map(function (b) { return fmtSheet(b) + ' за ' + nf.format(b.price) + ' грн'; }).join(', ') + '. ' : '') + 'Між деталями закладено різ ' + mm(p.kerf) + ' мм. Деталі можуть бути повернуті на 90°.</p><div class="sheets wide">' +
+      ac.bins.map(function (b, i) {
+        var used = b.items.reduce(function (s, it) { return s + it.w * it.h; }, 0);
+        return '<figure>' + binSvg(b, p) + '<figcaption><b>' + fmtSheet(b.sheet) + ' мм</b><span class="tag' + (b.sheet.owned ? '">куплений' : ' buy">докупити, ' + nf.format(b.sheet.price) + ' грн') + '</span><span>використано ' + Math.round(used / (b.W * b.H) * 100) + '%</span></figcaption></figure>';
+      }).join('') + '</div>';
+  }
+  html += '</section>';
+
+  $('out').innerHTML = html;
+  showModel(p);
+  var dl = $('dl');
+  if (dl) dl.addEventListener('click', function () { download(p); });
+  var lb = $('light');
+  if (lb) lb.addEventListener('click', function () { V.on = !V.on; applyLight(); draw(); });
+}
+
+// ---- 3D-перегляд ----
+var V = null, viewTried = false;
+function initView() {
+  if (viewTried) return V;
+  viewTried = true;
+  if (typeof THREE === 'undefined') return null;
+  try {
+    var r = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    var scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(32, 1, 1, 50000);
+    var amb = new THREE.AmbientLight(0xffffff, 0.7); scene.add(amb);
+    var d1 = new THREE.DirectionalLight(0xffffff, 0.65); d1.position.set(1, 2, 1.5); scene.add(d1);
+    var d2 = new THREE.DirectionalLight(0xffffff, 0.25); d2.position.set(-1.5, 0.5, -1); scene.add(d2);
+    var group = new THREE.Group(); scene.add(group);
+    V = { r: r, scene: scene, cam: cam, group: group, amb: amb, d1: d1, d2: d2, on: false, theta: 0.65, phi: 1.1, zoom: 1, R: 300, cy: 0, sig: '' };
+  } catch (e) { V = null; return null; }
+  var el = V.r.domElement, drag = null;
+  el.addEventListener('pointerdown', function (e) { drag = { x: e.clientX, y: e.clientY }; try { el.setPointerCapture(e.pointerId); } catch (x) {} });
+  el.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    V.theta -= (e.clientX - drag.x) * 0.01;
+    V.phi = Math.max(0.08, Math.min(Math.PI - 0.08, V.phi - (e.clientY - drag.y) * 0.01));
+    drag = { x: e.clientX, y: e.clientY };
+    draw();
+  });
+  el.addEventListener('pointerup', function () { drag = null; });
+  el.addEventListener('pointercancel', function () { drag = null; });
+  el.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    V.zoom = Math.max(0.4, Math.min(3, V.zoom * (e.deltaY > 0 ? 1.1 : 0.9)));
+    draw();
+  }, { passive: false });
+  if (typeof ResizeObserver !== 'undefined') V.ro = new ResizeObserver(function () { fit(); });
+  return V;
+}
+function applyLight() {
+  if (!V) return;
+  var on = V.on, host = $('view3d'), lb = $('light');
+  V.amb.intensity = on ? 0.22 : 0.3;
+  V.d1.intensity = on ? 0.12 : 0.32;
+  V.d2.intensity = on ? 0.05 : 0.1;
+  V.group.children.forEach(function (o) {
+    var m = o.material;
+    if (o.userData.kind === 'acryl') {
+      m.emissive.setHex(0xffdfae);
+      m.emissiveIntensity = on ? 1 : 0;
+      m.opacity = on ? 0.95 : 0.45;
+    } else {
+      // Скляна мозаїка просвічується: чіпи світяться власним кольором
+      if (on) m.emissive.copy(m.color); else m.emissive.setHex(0x000000);
+      m.emissiveIntensity = on ? 0.75 : 0;
+    }
+    m.needsUpdate = true;
+  });
+  if (host) host.classList.toggle('lit', on);
+  if (lb) { lb.setAttribute('aria-pressed', on ? 'true' : 'false'); lb.textContent = on ? 'Вимкнути світло' : 'Увімкнути світло'; }
+}
+function fit() {
+  var host = $('view3d');
+  if (!V || !host) return;
+  var w = host.clientWidth || 300, h = host.clientHeight || 360;
+  V.r.setSize(w, h, false);
+  V.cam.aspect = w / h;
+  V.cam.updateProjectionMatrix();
+  draw();
+}
+function draw() {
+  if (!V) return;
+  var R = V.R * V.zoom;
+  V.cam.position.set(R * Math.sin(V.phi) * Math.sin(V.theta), V.cy + R * Math.cos(V.phi), R * Math.sin(V.phi) * Math.cos(V.theta));
+  V.cam.lookAt(0, V.cy, 0);
+  V.r.render(V.scene, V.cam);
+}
+function showModel(p) {
+  var host = $('view3d');
+  if (!V || !host) return;
+  host.appendChild(V.r.domElement);
+  if (V.ro) { V.ro.disconnect(); V.ro.observe(host); }
+  var sig = JSON.stringify([p.W, p.D, p.H, p.chip, p.gap, p.tm, p.ta, p.edge, p.bottom, p.lid, p.walls, p.mcolor]);
+  if (sig !== V.sig) {
+    V.sig = sig;
+    while (V.group.children.length) {
+      var o = V.group.children[V.group.children.length - 1];
+      V.group.remove(o);
+      o.geometry.dispose(); o.material.dispose();
+    }
+    var boxes = modelBoxes(p);
+    boxes.filter(function (b) { return b.kind === 'acryl'; }).forEach(function (b) {
+      var m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xf4f8fa, emissive: 0xffd9a0, emissiveIntensity: 0.35, transparent: true, opacity: 0.55, roughness: 0.2 }));
+      m.position.set(b.c[0], b.c[2], -b.c[1]);
+      m.scale.set(b.s[0], b.s[2], b.s[1]);
+      m.userData.kind = 'acryl';
+      V.group.add(m);
+    });
+    var chips = boxes.filter(function (b) { return b.kind === 'chip'; });
+    if (chips.length) {
+      var im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: new THREE.Color(p.mcolor), roughness: 0.3, metalness: 0.05 }), chips.length);
+      var M = new THREE.Matrix4(), Q = new THREE.Quaternion();
+      chips.forEach(function (b, i) {
+        M.compose(new THREE.Vector3(b.c[0], b.c[2], -b.c[1]), Q, new THREE.Vector3(b.s[0], b.s[2], b.s[1]));
+        im.setMatrixAt(i, M);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;
+      im.userData.kind = 'chip';
+      V.group.add(im);
+    }
+    var a = acrylicParts(p);
+    V.cy = a.Ah / 2;
+    V.R = Math.sqrt(a.Aw * a.Aw + a.Ad * a.Ad + a.Ah * a.Ah) * 2.1 + 40;
+  }
+  applyLight();
+  fit();
+}
+function download(p) {
+  var msg = $('dlMsg'), name = 'svitylnyk-' + p.W + 'x' + p.D + 'x' + p.H + '.zip', data = modelZip(p);
+  function say(t) { if (msg) msg.textContent = t; }
+  function direct() {
+    try {
+      var url = URL.createObjectURL(new Blob([data], { type: 'application/zip' })), a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+      say('Файл ' + name + ' передано браузеру.');
+    } catch (e) { say('Не вдалося зберегти файл у цьому вікні.'); }
+  }
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('downloads').then(function (d) {
+      if (!d) { direct(); return; }
+      return d.save({ filename: name, data: data }).then(function () { say('Збережено ' + name + '.'); }, function (e) {
+        say(e && e.code === 'declined' ? 'Збереження скасовано.' : 'Не вдалося зберегти файл у цьому вікні. Відкрийте локальний index.html.');
+      });
+    }, direct);
+  } else direct();
+}
+
+if (typeof document !== 'undefined') {
+  fill(load());
+  $('form').addEventListener('input', render);
+  $('form').addEventListener('submit', function (e) { e.preventDefault(); });
+  $('reset').addEventListener('click', function () { fill(DEFAULTS); render(); });
+  render();
+}
+</script>
