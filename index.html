@@ -131,6 +131,9 @@ tr:last-child td { border-bottom: 0; }
 th { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 td.n, th.n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 td .sw { display: inline-block; vertical-align: -1px; margin-right: 6px; }
+table.wrap td { white-space: normal; }
+.jig { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 1100px) { .jig { grid-template-columns: minmax(0, 1fr); } .jig figure { max-width: 560px; } }
 </style>
 
 <div class="app">
@@ -198,6 +201,22 @@ td .sw { display: inline-block; vertical-align: -1px; margin-right: 6px; }
         </label>
         <div class="row two">
           <label class="f"><span>Різ, мм</span><input type="number" id="kerf" min="0" max="10" step="0.1"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Кондуктор з ДСП</legend>
+        <div class="row two">
+          <label class="f"><span>Короб від, чіпів</span><input type="number" id="jMin" min="1" max="60" step="1"></label>
+          <label class="f"><span>до, чіпів</span><input type="number" id="jMax" min="1" max="60" step="1"></label>
+        </div>
+        <div class="row">
+          <label class="f"><span>ДСП, мм</span><input type="number" id="dsp" min="8" max="40" step="1"></label>
+          <label class="f"><span>Висота упору, мм</span><input type="number" id="jH" min="20" max="300" step="1"></label>
+          <label class="f"><span>Шкант Ø, мм</span><input type="number" id="jPin" min="4" max="12" step="1"></label>
+        </div>
+        <div class="row two">
+          <label class="f"><span>Зазор у рамці, мм</span><input type="number" id="jClr" min="0" max="5" step="0.1"></label>
         </div>
       </fieldset>
 
@@ -358,6 +377,55 @@ function acrylicParts(p) {
   });
   return { Aw: Aw, Ad: Ad, Ah: Ah, one: one, parts: parts };
 }
+// ---- Кондуктор з ДСП для склеювання короба ----
+// Координати від внутрішнього кута рамки: x уздовж ширини, y уздовж глибини, короб у [0, A] × [0, A].
+// Упори стоять на ребрі вертушкою, кожен торцем упирається в сусіда:
+// Н (низ) y<0, від x=0 праворуч; П (право) x>A, від y=0 вгору; В (верх) y>A, від x=A ліворуч; Л (ліво) x<0, від y=A вниз.
+// У торці кожного упору шканти з кроком чіп + шов, тому одна мітка на упорі = один чіп розміру.
+var JIG_MARGIN = 25, JIG_DOWEL = 30;
+function jigPlan(p) {
+  var pitch = p.chip + p.gap, b = p.dsp, d = p.jPin;
+  var n0 = Math.min(p.jMin, p.jMax), n1 = Math.max(p.jMin, p.jMax), N = n1 - n0 + 1;
+  function A(n) { return span(n, p) + 2 * p.edge + p.jClr; }
+  var Amin = A(n0), Amax = A(n1), L = Amax + b;
+  var t0 = Math.max(12, d * 1.5), m = Math.floor((L - 2 * t0) / pitch + 1e-9), t = (L - m * pitch) / 2;
+  var k2 = m - (n1 - n0);
+  var sizes = [];
+  for (var n = n0; n <= n1; n++) sizes.push({ n: n, A: A(n) });
+  var holes = [];
+  function hole(bar, label, x, y) { holes.push({ bar: bar, label: label, x: x, y: y }); }
+  hole('Н', 'Н1', t, -b / 2); hole('Н', 'Н2', t + m * pitch, -b / 2);
+  var sideY = [Amin - t, Amin - t - k2 * pitch];
+  if (k2 >= 1) { hole('Л', 'Л1', -b / 2, sideY[0]); hole('Л', 'Л2', -b / 2, sideY[1]); }
+  var rightY = [t, t + m * pitch];
+  sizes.forEach(function (s) {
+    if (k2 >= 1) { hole('В', 'В' + s.n, sideY[0], s.A + b / 2); hole('В', 'В' + s.n, sideY[1], s.A + b / 2); }
+    hole('П', 'П' + s.n, s.A + b / 2, rightY[0]); hole('П', 'П' + s.n, s.A + b / 2, rightY[1]);
+  });
+  var closest = Infinity;
+  for (var i = 0; i < holes.length; i++) for (var j = i + 1; j < holes.length; j++)
+    closest = Math.min(closest, Math.hypot(holes[i].x - holes[j].x, holes[i].y - holes[j].y));
+  var off = b + JIG_MARGIN, B = Amax + 2 * off;
+  holes.forEach(function (h) { h.bx = h.x + off; h.by = h.y + off; });
+  var baseDepth = Math.max(6, b - 4);
+  return { pitch: pitch, b: b, n0: n0, n1: n1, N: N, A: A, Amin: Amin, Amax: Amax, L: L, t: t, m: m, k2: k2,
+    sizes: sizes, holes: holes, closest: closest, off: off, B: B, sideY: sideY, rightY: rightY,
+    baseDepth: baseDepth, barDepth: JIG_DOWEL - baseDepth + 2, overhang: Math.max(0, Amax - Amin - JIG_MARGIN) };
+}
+// Де стоїть кожен упор для короба aw × ad (у мм) і на яких мітках
+function jigSetup(j, nW, nD) {
+  var aw = j.A(nW), ad = j.A(nD), b = j.b, L = j.L;
+  return {
+    aw: aw, ad: ad,
+    bars: [
+      { key: 'front', code: 'Н', x: 0, y: -b, w: L, h: b },
+      { key: 'right', code: 'П', x: aw, y: 0, w: b, h: L },
+      { key: 'back', code: 'В', x: aw - L, y: ad, w: L, h: b },
+      { key: 'left', code: 'Л', x: -b, y: ad - L, w: b, h: L }
+    ]
+  };
+}
+
 function placeInBin(bin, it, kerf) {
   var EPS = 1e-6, best = null;
   [[it.w, it.h, false], [it.h, it.w, true]].forEach(function (o, oi) {
@@ -622,8 +690,9 @@ var MOSAIC = {
 function mosaicOf(p) { return MOSAIC[p.mcolor] || MOSAIC.orange; }
 var DEFAULTS = { W: 5, D: 5, H: 5, cube: true, qty: 1, chip: 25, gap: 1.5, sheetGap: 1.5, tm: 4, mcolor: 'orange', cols: 12, rows: 12,
   split: true, ta: 2, edge: 0, bottom: 0, lid: 'on', walls: 'fb', kerf: 0.2,
+  jMin: 5, jMax: 16, dsp: 16, jH: 60, jPin: 8, jClr: 0.5,
   catalog: '150 300 100\n300 300 190\n300 500 315\n400 500 405\n500 500 465\n600 500 535\n800 500 685\n500 1000 815\n500 1500 1190\n1000 1000 1480' };
-var INT = { W: 1, D: 1, H: 1, qty: 1, cols: 1, rows: 1 };
+var INT = { W: 1, D: 1, H: 1, qty: 1, cols: 1, rows: 1, jMin: 1, jMax: 1 };
 var KEY = 'mosaic-lamp-v7';
 var $ = function (id) { return document.getElementById(id); };
 var nf = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
@@ -720,6 +789,41 @@ function binSvg(bin, p) {
     svg += '<rect x="' + it.x + '" y="' + it.y + '" width="' + it.w + '" height="' + it.h + '" fill="' + color(it.part.key) + '" fill-opacity="0.75" stroke="var(--fg)" stroke-width="1"/>' +
       '<text x="' + cx + '" y="' + (cy - fs * 0.6) + '" font-size="' + fs + '" text-anchor="middle" dominant-baseline="central" fill="var(--on-chip)">' + t1 + '</text>' +
       '<text x="' + cx + '" y="' + (cy + fs * 0.6) + '" font-size="' + fs + '" text-anchor="middle" dominant-baseline="central" fill="var(--on-chip)">' + t2 + '</text>';
+  });
+  return svg + '</svg>';
+}
+function jigSvg(j, st) {
+  var off = j.off, B = j.B, pad = 6;
+  function X(x) { return x + off; }
+  function Y(y) { return B - (y + off); }
+  var minX = 0, maxX = B, minY = 0, maxY = B;
+  if (st) st.bars.forEach(function (r) {
+    minX = Math.min(minX, X(r.x)); maxX = Math.max(maxX, X(r.x + r.w));
+    minY = Math.min(minY, Y(r.y + r.h)); maxY = Math.max(maxY, Y(r.y));
+  });
+  var fs = Math.max(7, Math.min(10, j.pitch * 0.34)), svg = '<svg viewBox="' + (minX - pad) + ' ' + (minY - pad) + ' ' + (maxX - minX + 2 * pad) + ' ' + (maxY - minY + 2 * pad) + '" role="img" aria-label="Основа кондуктора з отворами">' +
+    '<rect x="0" y="0" width="' + B + '" height="' + B + '" rx="2" fill="var(--sunken)" stroke="var(--muted)" stroke-width="1"/>';
+  var used = st ? { 'Н1': 1, 'Н2': 1, 'Л1': 1, 'Л2': 1 } : {};
+  if (st) { used['В' + st.nD] = 1; used['П' + st.nW] = 1; }
+  if (st) {
+    svg += '<rect x="' + X(0) + '" y="' + Y(st.ad) + '" width="' + st.aw + '" height="' + st.ad + '" fill="var(--acryl)" stroke="var(--fg)" stroke-width="1"/>' +
+      '<text x="' + X(st.aw / 2) + '" y="' + Y(st.ad / 2) + '" font-size="' + fs * 1.3 + '" text-anchor="middle" dominant-baseline="central" fill="var(--fg)">' + mm(st.aw) + ' × ' + mm(st.ad) + '</text>';
+    st.bars.forEach(function (r) {
+      svg += '<rect x="' + X(r.x) + '" y="' + Y(r.y + r.h) + '" width="' + r.w + '" height="' + r.h + '" fill="' + color(r.key) + '" fill-opacity="0.55" stroke="var(--fg)" stroke-width="0.8"/>';
+      var horiz = r.w > r.h;
+      svg += '<text x="' + X(r.x + r.w / 2) + '" y="' + Y(r.y + r.h / 2) + '" font-size="' + fs + '" text-anchor="middle" dominant-baseline="central" fill="var(--on-chip)"' +
+        (horiz ? '' : ' transform="rotate(-90 ' + X(r.x + r.w / 2) + ' ' + Y(r.y + r.h / 2) + ')"') + '>' + r.code + '</text>';
+    });
+  }
+  var r0 = j.holes.length ? Math.max(1.5, Math.min(4, j.pitch * 0.15)) : 0;
+  j.holes.forEach(function (h) {
+    var on = used[h.label];
+    svg += '<circle cx="' + X(h.x) + '" cy="' + Y(h.y) + '" r="' + r0 + '" fill="' + (on ? 'var(--fg)' : 'var(--surface)') + '" stroke="var(--fg)" stroke-width="0.7"/>';
+  });
+  // Номери рядів: під правими отворами і ліворуч від верхніх
+  j.sizes.forEach(function (s) {
+    svg += '<text x="' + X(s.A + j.b / 2) + '" y="' + (Y(j.rightY[0]) + r0 + fs * 0.9) + '" font-size="' + fs * 0.85 + '" text-anchor="middle" dominant-baseline="central" fill="var(--muted)">' + s.n + '</text>';
+    if (j.k2 >= 1) svg += '<text x="' + (X(j.sideY[1]) - r0 - 2) + '" y="' + Y(s.A + j.b / 2) + '" font-size="' + fs * 0.85 + '" text-anchor="end" dominant-baseline="central" fill="var(--muted)">' + s.n + '</text>';
   });
   return svg + '</svg>';
 }
@@ -842,6 +946,43 @@ function render() {
       }).join('') + '</div>';
   }
   html += '</section>';
+
+  // Кондуктор
+  var j = jigPlan(p), inW = p.W >= j.n0 && p.W <= j.n1, inD = p.D >= j.n0 && p.D <= j.n1;
+  var st = inW && inD ? Object.assign(jigSetup(j, p.W, p.D), { nW: p.W, nD: p.D }) : null;
+  html += '<section><h2>Кондуктор з ДСП</h2><p class="sub">Рамка для склеювання короба з оргскла під прямим кутом. Основа і 4 однакові упори на ребрі, упори стоять вертушкою: кожен торцем упирається в сусіда. ' +
+    'Упори тримаються на шкантах Ø' + mm(p.jPin) + ' мм, крок отворів ' + mm(j.pitch) + ' мм = чіп + шов, тобто один ряд отворів на один чіп. Підходить для коробів від ' + j.n0 + ' до ' + j.n1 + ' чіпів у будь-якому поєднанні ширини й глибини.</p>';
+  if (j.k2 < 1) html += '<p class="warn">Діапазон занадто широкий для найменшого короба: лівому й верхньому упорам не вистачає двох спільних отворів. Збільште нижню межу діапазону.</p>';
+  if (j.closest < p.jPin + 4) html += '<p class="warn">Деякі отвори в основі ближче ніж ' + mm(p.jPin + 4) + ' мм між центрами, ДСП між ними може викришитися. Візьміть тонший шкант.</p>';
+  if (!st) html += '<p class="warn">Поточний світильник ' + p.W + ' × ' + p.D + ' чіпів не входить у діапазон кондуктора ' + j.n0 + '–' + j.n1 + '.</p>';
+  html += '<div class="jig"><figure>' + jigSvg(j, st) + '<figcaption><b>Основа ' + mm(j.B) + ' × ' + mm(j.B) + ' мм</b><span>' + j.holes.length + ' отворів</span></figcaption></figure><div style="display:grid;gap:12px">';
+  html += '<div class="tbl"><table><thead><tr><th>Деталь з ДСП ' + mm(p.dsp) + ' мм</th><th class="n">Розмір, мм</th><th class="n">Шт</th></tr></thead><tbody>' +
+    '<tr><td>Основа</td><td class="n">' + mm(j.B) + ' × ' + mm(j.B) + '</td><td class="n">1</td></tr>' +
+    '<tr><td>Упор</td><td class="n">' + mm(j.L) + ' × ' + mm(p.jH) + '</td><td class="n">4</td></tr>' +
+    '<tr><td>Шкант Ø' + mm(p.jPin) + ' × ' + JIG_DOWEL + '</td><td class="n"></td><td class="n">8</td></tr></tbody></table></div>';
+  if (st) html += '<div class="tbl"><table class="wrap"><thead><tr><th>Упор</th><th>Під ' + p.W + ' × ' + p.D + ' чіпів</th></tr></thead><tbody>' +
+    '<tr><td><span class="sw" style="background:' + color('front') + '"></span>Н, низ</td><td>Отвори Н1 і Н2, не переставляється</td></tr>' +
+    '<tr><td><span class="sw" style="background:' + color('right') + '"></span>П, право</td><td>Ряд П' + p.W + ', крайні отвори упору</td></tr>' +
+    '<tr><td><span class="sw" style="background:' + color('back') + '"></span>В, верх</td><td>Ряд В' + p.D + ', мітка ' + p.W + ' на правому отворі</td></tr>' +
+    '<tr><td><span class="sw" style="background:' + color('left') + '"></span>Л, ліво</td><td>Отвори Л1 і Л2, мітка ' + p.D + ' на верхньому</td></tr>' +
+    '</tbody></table></div>' +
+    '<p class="sub">Рамка всередині ' + mm(st.aw) + ' × ' + mm(st.ad) + ' мм: короб ' + mm(a.Aw) + ' × ' + mm(a.Ad) + ' мм плюс зазор ' + mm(p.jClr) + ' мм.</p>';
+  html += '</div></div>';
+  html += '<h2>Отвори</h2><p class="sub">Координати центрів від лівого нижнього кута основи, x праворуч, y вгору, як на схемі. ' +
+    'В основі глухі отвори Ø' + mm(p.jPin) + ' глибиною ' + mm(j.baseDepth) + ' мм, у нижньому торці кожного упору ' + (j.m + 1) + ' отворів глибиною ' + mm(j.barDepth) + ' мм: перший за ' + mm(j.t) + ' мм від торця, далі через ' + mm(j.pitch) + ' мм. ' +
+    'Підпишіть отвори упору від одного торця числами ' + j.n0 + ', ' + (j.n0 + 1) + ', ' + (j.n0 + 2) + '… Цей торець упирається в сусідній упор.</p>';
+  html += '<div class="tbl"><table><thead><tr><th>Упор</th><th>Отвір</th><th class="n">x, мм</th><th class="n">y, мм</th></tr></thead><tbody>' +
+    j.holes.filter(function (h) { return h.bar === 'Н' || h.bar === 'Л'; }).map(function (h) {
+      return '<tr><td>' + h.bar + '</td><td>' + h.label + '</td><td class="n">' + mm(h.bx) + '</td><td class="n">' + mm(h.by) + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+  if (j.k2 >= 1) html += '<div class="tbl"><table><thead><tr><th class="n">Чіпів</th><th class="n">Рамка, мм</th><th class="n">П: x</th><th class="n">В: y</th></tr></thead><tbody>' +
+    j.sizes.map(function (s) {
+      return '<tr><td class="n">' + s.n + '</td><td class="n">' + mm(s.A) + '</td><td class="n">' + mm(s.A + j.b / 2 + j.off) + '</td><td class="n">' + mm(s.A + j.b / 2 + j.off) + '</td></tr>';
+    }).join('') + '</tbody></table></div>' +
+    '<p class="sub">Ряд П: по два отвори на y = ' + mm(j.rightY[0] + j.off) + ' і ' + mm(j.rightY[1] + j.off) + ' мм. Ряд В: по два отвори на x = ' + mm(j.sideY[1] + j.off) + ' і ' + mm(j.sideY[0] + j.off) + ' мм.</p>';
+  html += '<p class="sub">Короб ставлять догори дном: ' + (p.lid === 'on' ? 'кришка лягає на основу, стінки стають на неї' : 'стінки стають на основу, кришку вкладають між ними') + ' і впираються в упори. ' +
+    (j.overhang > 0 ? 'На малих розмірах верхній і лівий упори виходять за основу до ' + mm(j.overhang) + ' мм, так і має бути. ' : '') +
+    'Кондуктор прив’язаний до кроку ' + mm(j.pitch) + ' мм і припуску на кут: якщо їх змінити, отвори доведеться свердлити заново.</p></section>';
 
   $('out').innerHTML = html;
   showModel(p);
