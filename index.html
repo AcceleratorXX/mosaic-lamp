@@ -118,6 +118,9 @@ button.primary { font: inherit; font-weight: 600; font-size: 14px; padding: 9px 
 button.primary:hover { filter: brightness(1.08); }
 button.lamp { font: inherit; font-weight: 600; font-size: 14px; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
 button.lamp[aria-pressed="true"] { background: var(--f-top); border-color: var(--f-top); color: var(--on-chip); }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; padding-block: 2px; }
+button.swatch { width: 34px; height: 34px; padding: 0; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; box-shadow: inset 0 0 0 2px var(--surface); }
+button.swatch[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
 input[type="color"] { width: 100%; height: 34px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .formula { font-family: var(--font-mono); font-size: 13.5px; margin: 0; overflow-x: auto; white-space: nowrap; }
 svg text { font-family: var(--font-mono); font-weight: 600; }
@@ -153,19 +156,22 @@ td .sw { display: inline-block; vertical-align: -1px; margin-right: 6px; }
 
       <fieldset>
         <legend>Мозаїка</legend>
-        <div class="row">
+        <div class="row two">
           <label class="f"><span>Чіп, мм</span><input type="number" id="chip" min="1" max="200" step="0.1"></label>
           <label class="f"><span>Товщина, мм</span><input type="number" id="tm" min="0" max="20" step="0.1"></label>
-          <label class="f"><span>Колір</span><input type="color" id="mcolor"></label>
+        </div>
+        <div class="f"><span id="mcolorLabel">Колір</span>
+          <input type="hidden" id="mcolor">
+          <div class="swatches" id="swatches" role="group" aria-labelledby="mcolorLabel"></div>
+          <p class="hint" id="mcolorHint"></p>
         </div>
         <div class="row two">
           <label class="f"><span>Шов на листі, мм</span><input type="number" id="sheetGap" min="0" max="20" step="0.1"></label>
           <label class="f"><span>Шов на виробі, мм</span><input type="number" id="gap" min="0" max="20" step="0.1"></label>
         </div>
-        <div class="row">
+        <div class="row two">
           <label class="f"><span>Чіпів у ряду</span><input type="number" id="cols" min="1" max="40" step="1"></label>
           <label class="f"><span>Рядів</span><input type="number" id="rows" min="1" max="40" step="1"></label>
-          <label class="f"><span>Ціна листа, грн</span><input type="number" id="priceM" min="0" step="1"></label>
         </div>
         <p class="hint" id="sheetHint"></p>
         <label class="check"><input type="checkbox" id="split"> Складати грань із залишків</label>
@@ -197,12 +203,7 @@ td .sw { display: inline-block; vertical-align: -1px; margin-right: 6px; }
 
       <fieldset>
         <legend>Листи оргскла</legend>
-        <p class="hint">Уже куплений лист використовується першим і в ціну не входить.</p>
-        <div class="row">
-          <label class="f"><span>Куплений, ширина</span><input type="number" id="ownW" min="10" max="4000" step="1"></label>
-          <label class="f"><span>Висота</span><input type="number" id="ownH" min="10" max="4000" step="1"></label>
-          <label class="f"><span>Штук</span><input type="number" id="ownN" min="0" max="20" step="1"></label>
-        </div>
+        <p class="hint">Сервіс вибирає найдешевший набір листів, у який влазять усі деталі.</p>
         <label class="f"><span>Формати в продажу: ширина, висота, ціна в грн</span>
           <textarea id="catalog" rows="10" spellcheck="false"></textarea>
         </label>
@@ -591,7 +592,7 @@ function hexRgb(h) {
   return [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255];
 }
 function modelZip(p) {
-  var enc = new TextEncoder(), boxes = modelBoxes(p), rgb = hexRgb(p.mcolor).map(r3).join(' ');
+  var enc = new TextEncoder(), boxes = modelBoxes(p), rgb = hexRgb(p.hex || '#f2692e').map(r3).join(' ');
   var mtl = 'newmtl acryl\nKd 0.92 0.96 1\nd 0.35\n\nnewmtl mosaic\nKd ' + rgb + '\nd 1\n';
   var info = 'Svitylnyk ' + p.W + 'x' + p.D + 'x' + p.H + ' chips. Units: mm, Z up, bottom open.\n' +
     'lamp.obj + lamp.mtl - full model (acrylic panels and mosaic faces as separate objects)\n' +
@@ -607,11 +608,23 @@ function modelZip(p) {
 // </logic>
 
 // ---- Інтерфейс ----
-var DEFAULTS = { W: 5, D: 5, H: 5, cube: true, qty: 1, chip: 25, gap: 1.5, sheetGap: 1.5, tm: 4, mcolor: '#f2692e', cols: 12, rows: 12, priceM: 0,
-  split: true, ta: 2, edge: 0, bottom: 0, lid: 'on', walls: 'fb', kerf: 0.2, ownW: 800, ownH: 500, ownN: 1,
+var MOSAIC = {
+  white: { name: 'Білий', code: 'MK25101', hex: '#ECEBE4', price: 99 },
+  skyblue: { name: 'Блакитний', code: 'MK25102', hex: '#2FA3D5', price: 130 },
+  blue: { name: 'Синій', code: 'MK25103', hex: '#2140D9', price: 147 },
+  yellow: { name: 'Жовтий', code: 'MK25111', hex: '#F1CB1E', price: 160 },
+  green: { name: 'Зелений', code: 'MK25113', hex: '#7A9B3C', price: 160 },
+  darkgreen: { name: 'Темно-зелений', code: 'MK25112', hex: '#1F5B46', price: 160 },
+  black: { name: 'Чорний', code: 'MK25109', hex: '#1C1C1F', price: 173 },
+  orange: { name: 'Помаранчевий', code: 'MK25124', hex: '#F2692E', price: 260 },
+  red: { name: 'Червоний', code: 'MK25121', hex: '#C9212F', price: 260 }
+};
+function mosaicOf(p) { return MOSAIC[p.mcolor] || MOSAIC.orange; }
+var DEFAULTS = { W: 5, D: 5, H: 5, cube: true, qty: 1, chip: 25, gap: 1.5, sheetGap: 1.5, tm: 4, mcolor: 'orange', cols: 12, rows: 12,
+  split: true, ta: 2, edge: 0, bottom: 0, lid: 'on', walls: 'fb', kerf: 0.2,
   catalog: '150 300 100\n300 300 190\n300 500 315\n400 500 405\n500 500 465\n600 500 535\n800 500 685\n500 1000 815\n500 1500 1190\n1000 1000 1480' };
-var INT = { W: 1, D: 1, H: 1, qty: 1, cols: 1, rows: 1, ownN: 1 };
-var KEY = 'mosaic-lamp-v6';
+var INT = { W: 1, D: 1, H: 1, qty: 1, cols: 1, rows: 1 };
+var KEY = 'mosaic-lamp-v7';
 var $ = function (id) { return document.getElementById(id); };
 var nf = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 });
 function mm(x) { return nf.format(Math.round(x * 10) / 10); }
@@ -634,7 +647,7 @@ function read() {
   Object.keys(DEFAULTS).forEach(function (k) {
     var el = $(k);
     if (el.type === 'checkbox') { p[k] = el.checked; return; }
-    if (el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.type === 'color') { p[k] = el.value; return; }
+    if (el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.type === 'hidden') { p[k] = el.value; return; }
     var v = parseFloat(el.value);
     if (!isFinite(v)) v = DEFAULTS[k];
     var lo = parseFloat(el.min), hi = parseFloat(el.max);
@@ -725,24 +738,36 @@ function render() {
   var faces = buildFaces(p);
   var mos = packMosaic(faces, p.rows, p.cols, p.split);
   var a = acrylicParts(p);
-  var owned = [];
-  for (var oi = 0; oi < p.ownN; oi++) owned.push({ w: p.ownW, h: p.ownH, price: 0, owned: true });
   var catalog = parseCatalog(p.catalog);
-  var ac = chooseSheets(a.parts, owned, catalog, p.kerf);
+  var ac = chooseSheets(a.parts, [], catalog, p.kerf);
   ac.bins = ac.bins.filter(function (b) { return b.items.length; });
-  var fromOwned = maxLamps(p, owned, p.kerf);
+  var mz = mosaicOf(p);
+  var sw = $('swatches');
+  if (!sw.children.length) Object.keys(MOSAIC).forEach(function (k) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'swatch'; b.style.background = MOSAIC[k].hex;
+    b.title = MOSAIC[k].name + ', ' + MOSAIC[k].price + ' грн';
+    b.setAttribute('aria-label', b.title);
+    b.setAttribute('data-k', k);
+    b.addEventListener('click', function () { $('mcolor').value = k; render(); });
+    sw.appendChild(b);
+  });
+  Array.prototype.forEach.call(sw.children, function (b) {
+    b.setAttribute('aria-pressed', MOSAIC[b.getAttribute('data-k')] === mz ? 'true' : 'false');
+  });
+  $('mcolorHint').innerHTML = mz.name + ' ' + mz.code + ', <b>' + mz.price + ' грн</b> за лист';
   function fmtSheet(sh) { return mm(sh.w) + ' × ' + mm(sh.h); }
   var html = '';
 
   // Підсумок
-  var cost = (mos ? mos.sheets.length * p.priceM : 0) + ac.cost;
+  var costM = mos ? mos.sheets.length * mz.price : 0, cost = costM + ac.cost;
   html += '<div class="summary">' +
+    stat('Матеріали разом', nf.format(cost) + ' грн', p.qty > 1 ? nf.format(Math.round(cost / p.qty)) + ' грн на 1 світильник' : 'мозаїка та оргскло, без доставки') +
+    stat('Мозаїка', nf.format(costM) + ' грн', mos ? mos.sheets.length + ' × ' + mz.price + ' грн, ' + mz.name.toLowerCase() + ' ' + mz.code : '') +
+    stat('Оргскло', ac.bought.length ? nf.format(ac.cost) + ' грн' : '—', ac.bought.length ? ac.bought.map(fmtSheet).join(', ') + ' мм' : 'деталі не влазять у жоден формат') +
     stat('Листів мозаїки', mos ? mos.sheets.length : '—', mos ? 'потрібно ' + mos.total + ' чіпів, залишок ' + mos.left : '') +
-    stat('Докупити оргскла', ac.bought.length ? nf.format(ac.cost) + ' грн' : '0 грн', ac.bought.length ? ac.bought.map(fmtSheet).join(', ') + ' мм' : (ac.unplaced.length ? 'деталі не влазять' : 'вистачає купленого листа')) +
-    (owned.length ? stat('З купленого листа', fromOwned + ' шт', 'світильників такого розміру з ' + fmtSheet(owned[0]) + (owned.length > 1 ? ' × ' + owned.length : '')) : '') +
     stat('Габарит з мозаїкою', mm(a.Aw + 2 * p.tm) + ' × ' + mm(a.Ad + 2 * p.tm), 'висота ' + mm(a.Ah + p.tm) + ' мм') +
     stat('Короб з оргскла', mm(a.Aw) + ' × ' + mm(a.Ad), 'висота ' + mm(a.Ah) + ' мм') +
-    (cost > 0 && p.priceM > 0 ? stat('Матеріали разом', nf.format(cost) + ' грн', 'мозаїка та докуплене оргскло') : '') +
     '</div>';
 
   // Вигляд
@@ -813,7 +838,7 @@ function render() {
     html += '<h2>Розкрій оргскла</h2><p class="sub">' + (ac.bought.length ? 'Найдешевший набір, у який влазять усі деталі: ' + ac.bought.map(function (b) { return fmtSheet(b) + ' за ' + nf.format(b.price) + ' грн'; }).join(', ') + '. ' : '') + 'Між деталями закладено різ ' + mm(p.kerf) + ' мм. Деталі можуть бути повернуті на 90°.</p><div class="sheets wide">' +
       ac.bins.map(function (b, i) {
         var used = b.items.reduce(function (s, it) { return s + it.w * it.h; }, 0);
-        return '<figure>' + binSvg(b, p) + '<figcaption><b>' + fmtSheet(b.sheet) + ' мм</b><span class="tag' + (b.sheet.owned ? '">куплений' : ' buy">докупити, ' + nf.format(b.sheet.price) + ' грн') + '</span><span>використано ' + Math.round(used / (b.W * b.H) * 100) + '%</span></figcaption></figure>';
+        return '<figure>' + binSvg(b, p) + '<figcaption><b>' + fmtSheet(b.sheet) + ' мм</b><span class="tag buy">' + nf.format(b.sheet.price) + ' грн</span><span>використано ' + Math.round(used / (b.W * b.H) * 100) + '%</span></figcaption></figure>';
       }).join('') + '</div>';
   }
   html += '</section>';
@@ -922,7 +947,7 @@ function showModel(p) {
     });
     var chips = boxes.filter(function (b) { return b.kind === 'chip'; });
     if (chips.length) {
-      var im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: new THREE.Color(p.mcolor), roughness: 0.3, metalness: 0.05 }), chips.length);
+      var im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: new THREE.Color(mosaicOf(p).hex), roughness: 0.3, metalness: 0.05 }), chips.length);
       var M = new THREE.Matrix4(), Q = new THREE.Quaternion();
       chips.forEach(function (b, i) {
         M.compose(new THREE.Vector3(b.c[0], b.c[2], -b.c[1]), Q, new THREE.Vector3(b.s[0], b.s[2], b.s[1]));
@@ -941,7 +966,7 @@ function showModel(p) {
   fit();
 }
 function download(p) {
-  var msg = $('dlMsg'), name = 'svitylnyk-' + p.W + 'x' + p.D + 'x' + p.H + '.zip', data = modelZip(p);
+  var msg = $('dlMsg'), name = 'svitylnyk-' + p.W + 'x' + p.D + 'x' + p.H + '.zip', data = modelZip(Object.assign({}, p, { hex: mosaicOf(p).hex }));
   function say(t) { if (msg) msg.textContent = t; }
   function direct() {
     try {
