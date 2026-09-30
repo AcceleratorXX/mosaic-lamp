@@ -777,8 +777,8 @@ function render() {
   function formula(n) { return n + ' × ' + mm(p.chip) + ' + ' + (n - 1) + ' × ' + mm(p.gap) + ' = ' + mm(span(n, p)) + ' мм'; }
   var dims = [['Ширина', p.W], ['Глибина', p.D], ['Висота', p.H]];
   html += '<section><h2>Світильник ' + p.W + ' × ' + p.D + ' × ' + p.H + ' чіпів</h2>' +
-    (initView() ? '<div class="view3d" id="view3d"></div><div class="bar"><button type="button" class="lamp" id="light" aria-pressed="false">Увімкнути світло</button><button type="button" class="primary" id="dl">Завантажити 3D-модель (ZIP)</button>' +
-      '<span class="sub" id="dlMsg">OBJ і STL у міліметрах. Тягніть модель, щоб обертати, колесо наближає.</span></div>' : isoSvg(p, a)) +
+    (initView() ? '<div class="view3d" id="view3d"></div><div class="bar"><button type="button" class="lamp" id="light" aria-pressed="false">Увімкнути світло</button><button type="button" class="lamp" id="addLamp">Додати ще світильник</button><button type="button" class="lamp" id="removeLamp" hidden>Прибрати вибраний</button><button type="button" class="primary" id="dl">Завантажити 3D-модель (ZIP)</button>' +
+      '<span class="sub" id="dlMsg">OBJ і STL у міліметрах. Тягніть світильник, щоб пересунути його по столу, тягніть поруч, щоб обертати кімнату, колесо наближає. Клік вибирає світильник, і форма зліва редагує саме його.</span><span class="sub" id="lampSel"></span></div>' : isoSvg(p, a)) +
     '<div style="display:grid;gap:10px">' +
     dims.map(function (d) { return '<p class="formula">' + d[0] + ': ' + formula(d[1]) + '</p>'; }).join('') +
     '<p class="sub">Поле мозаїки на грані: ' + mm(span(p.W, p)) + ' × ' + mm(span(p.H, p)) + ' мм спереду, ' +
@@ -849,6 +849,9 @@ function render() {
   if (dl) dl.addEventListener('click', function () { download(p); });
   var lb = $('light');
   if (lb) lb.addEventListener('click', function () { V.on = !V.on; applyLight(); draw(); });
+  var ad = $('addLamp'), rm = $('removeLamp');
+  if (ad) ad.addEventListener('click', addLamp);
+  if (rm) rm.addEventListener('click', removeLamp);
 }
 
 // ---- 3D-перегляд ----
@@ -864,35 +867,263 @@ function initView() {
     var amb = new THREE.AmbientLight(0xffffff, 0.7); scene.add(amb);
     var d1 = new THREE.DirectionalLight(0xffffff, 0.65); d1.position.set(1, 2, 1.5); scene.add(d1);
     var d2 = new THREE.DirectionalLight(0xffffff, 0.25); d2.position.set(-1.5, 0.5, -1); scene.add(d2);
-    var group = new THREE.Group(); scene.add(group);
-    V = { r: r, scene: scene, cam: cam, group: group, amb: amb, d1: d1, d2: d2, on: false, theta: 0.65, phi: 1.1, zoom: 1, R: 300, cy: 0, sig: '' };
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    d1.castShadow = true;
+    d1.shadow.mapSize.set(2048, 2048);
+    d1.shadow.bias = -0.0004;
+    scene.add(d1.target);
+    // Світло лампи всередині короба: скло пропускає його, тому без тіней
+    var bulb = new THREE.PointLight(0xffd9a0, 0, 900, 1.6); scene.add(bulb);
+    var hemi = new THREE.HemisphereLight(0xfff6ea, 0x6b5440, 0.3); scene.add(hemi);
+    var screenLight = new THREE.PointLight(0x9fb8ff, 0, 900, 1.5); scene.add(screenLight);
+    scene.fog = new THREE.Fog(0xd8d1c4, 1000, 4000);
+    scene.background = new THREE.Color(0xd8d1c4);
+    var group = new THREE.Group(), env = new THREE.Group(); scene.add(group); scene.add(env);
+    V = { r: r, scene: scene, cam: cam, group: group, env: env, amb: amb, hemi: hemi, d1: d1, d2: d2, bulb: bulb, screenLight: screenLight, tex: roomTextures(),
+      lamps: [], active: null, on: false, theta: 0.65, phi: 1.12, zoom: 1, R: 1240, cy: 125 };
+    makeLamp(group, bulb);
   } catch (e) { V = null; return null; }
   var el = V.r.domElement, drag = null;
-  el.addEventListener('pointerdown', function (e) { drag = { x: e.clientX, y: e.clientY }; try { el.setPointerCapture(e.pointerId); } catch (x) {} });
+  el.addEventListener('pointerdown', function (e) {
+    var g = lampGrab(e), p = g && g.L.group.position;
+    drag = { x: e.clientX, y: e.clientY, moved: false, move: g ? { L: g.L, dx: p.x - g.q.x, dz: p.z - g.q.z } : null };
+    try { el.setPointerCapture(e.pointerId); } catch (x) {}
+  });
   el.addEventListener('pointermove', function (e) {
-    if (!drag) return;
+    if (!drag) { el.style.cursor = lampGrab(e) ? 'move' : ''; return; }
+    if (drag.move) {
+      if (!drag.moved && Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) < 4) return;
+      drag.moved = true;
+      var q = deskPoint(e);
+      if (q) { placeLamp(drag.move.L, q.x + drag.move.dx, q.z + drag.move.dz); draw(); }
+      return;
+    }
     V.theta -= (e.clientX - drag.x) * 0.01;
-    V.phi = Math.max(0.08, Math.min(Math.PI - 0.08, V.phi - (e.clientY - drag.y) * 0.01));
+    V.phi = Math.max(0.08, Math.min(1.5, V.phi - (e.clientY - drag.y) * 0.01));
     drag = { x: e.clientX, y: e.clientY };
     draw();
   });
-  el.addEventListener('pointerup', function () { drag = null; });
+  // Клік без перетягування вибирає світильник для редагування
+  el.addEventListener('pointerup', function () {
+    var d = drag;
+    drag = null;
+    if (d && d.move && !d.moved && d.move.L !== V.active) selectLamp(d.move.L);
+  });
   el.addEventListener('pointercancel', function () { drag = null; });
   el.addEventListener('wheel', function (e) {
     e.preventDefault();
-    V.zoom = Math.max(0.4, Math.min(3, V.zoom * (e.deltaY > 0 ? 1.1 : 0.9)));
+    V.zoom = Math.max(0.4, Math.min(4, V.zoom * (e.deltaY > 0 ? 1.1 : 0.9)));
     draw();
   }, { passive: false });
   if (typeof ResizeObserver !== 'undefined') V.ro = new ResizeObserver(function () { fit(); });
   return V;
 }
+// ---- Світильники на столі: перший повторює форму, додані зберігають розміри й колір, з якими їх поставили ----
+var MAX_LAMPS = 6;
+// Що належить конкретному світильнику; решта форми (листи, ціни, кількість) спільна
+var LAMP_KEYS = ['W', 'D', 'H', 'cube', 'chip', 'gap', 'tm', 'mcolor', 'ta', 'edge', 'bottom', 'lid', 'walls'];
+function lampSig(p) { return JSON.stringify(LAMP_KEYS.map(function (k) { return p[k]; })); }
+function makeLamp(group, bulb) {
+  var L = { group: group || new THREE.Group(), bulb: bulb || new THREE.PointLight(0xffd9a0, 0, 900, 1.6),
+    cord: new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0xf1efe9, roughness: 0.6 })) };
+  L.cord.castShadow = L.cord.receiveShadow = true;
+  if (!group) V.scene.add(L.group);
+  if (!bulb) V.scene.add(L.bulb);
+  V.scene.add(L.cord);
+  V.lamps.push(L);
+  return L;
+}
+function clearGroup(g) {
+  while (g.children.length) { var o = g.children[g.children.length - 1]; g.remove(o); o.geometry.dispose(); o.material.dispose(); }
+}
+function dropLamp(L) {
+  [L.group, L.bulb, L.cord].forEach(function (o) { V.scene.remove(o); });
+  clearGroup(L.group);
+  L.cord.geometry.dispose(); L.cord.material.dispose();
+  V.lamps.splice(V.lamps.indexOf(L), 1);
+}
+function fillLamp(L, p) {
+  clearGroup(L.group);
+  var boxes = modelBoxes(p);
+  boxes.filter(function (b) { return b.kind === 'acryl'; }).forEach(function (b) {
+    var m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xf4f8fa, emissive: 0xffd9a0, emissiveIntensity: 0.35, transparent: true, opacity: 0.55, roughness: 0.2 }));
+    m.position.set(b.c[0], b.c[2], -b.c[1]);
+    m.scale.set(b.s[0], b.s[2], b.s[1]);
+    m.userData.kind = 'acryl';
+    L.group.add(m);
+  });
+  var chips = boxes.filter(function (b) { return b.kind === 'chip'; });
+  if (chips.length) {
+    var im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: new THREE.Color(mosaicOf(p).hex), roughness: 0.3, metalness: 0.05 }), chips.length);
+    var M = new THREE.Matrix4(), Q = new THREE.Quaternion();
+    chips.forEach(function (b, i) {
+      M.compose(new THREE.Vector3(b.c[0], b.c[2], -b.c[1]), Q, new THREE.Vector3(b.s[0], b.s[2], b.s[1]));
+      im.setMatrixAt(i, M);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    im.frustumCulled = false;
+    im.castShadow = true;
+    im.userData.kind = 'chip';
+    L.group.add(im);
+  }
+  var a = acrylicParts(p);
+  L.p = p; L.sig = lampSig(p);
+  L.a = a; L.hw = a.Aw / 2 + p.tm; L.hd = a.Ad / 2 + p.tm; L.h = a.Ah + p.tm; L.cx = Math.min(a.Aw / 4, 40);
+  // Скло фарбує світло лампи у свій колір
+  L.bulb.color.set(0xffd9a0).lerp(new THREE.Color(mosaicOf(p).hex), 0.45);
+  return a;
+}
+// Промінь від курсора: точка на площині стільниці і світильник під курсором
+function pointerRay(e) {
+  var el = V.r.domElement, b = el.getBoundingClientRect(), rc = new THREE.Raycaster();
+  rc.setFromCamera(new THREE.Vector2((e.clientX - b.left) / b.width * 2 - 1, -(e.clientY - b.top) / b.height * 2 + 1), V.cam);
+  return rc.ray;
+}
+function deskPoint(e) {
+  return pointerRay(e).intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+}
+function lampGrab(e) {
+  if (!V.desk) return null;
+  var ray = pointerRay(e), best = null, bd = Infinity, pt = new THREE.Vector3();
+  V.lamps.forEach(function (L) {
+    var p = L.group.position, box = new THREE.Box3(new THREE.Vector3(p.x - L.hw, 0, p.z - L.hd), new THREE.Vector3(p.x + L.hw, L.h, p.z + L.hd));
+    if (ray.intersectBox(box, pt) && pt.distanceTo(ray.origin) < bd) { bd = pt.distanceTo(ray.origin); best = L; }
+  });
+  var q = best && deskPoint(e);
+  return q ? { L: best, q: q } : null;
+}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+// Межі стільниці для центру світильника: відступ від країв і від стіни
+function lampBounds(L) {
+  var D = V.desk;
+  return { x0: D.x0 + L.hw + 10, x1: D.x1 - L.hw - 10, z0: D.back + L.hd + 5, z1: D.front - L.hd - 10 };
+}
+function lampFree(L, x, z, gap) {
+  var g = gap || 8;
+  function hit(x0, x1, z0, z1) { return x + L.hw > x0 && x - L.hw < x1 && z + L.hd > z0 && z - L.hd < z1; }
+  return !V.obst.some(function (b) { return hit(b.min.x, b.max.x, b.min.z, b.max.z); }) &&
+    !V.lamps.some(function (o) {
+      if (o === L) return false;
+      var p = o.group.position;
+      return hit(p.x - o.hw - g, p.x + o.hw + g, p.z - o.hd - g, p.z + o.hd + g);
+    });
+}
+// Найближче до (x, z) вільне місце на столі з проміжком між світильниками або null
+function freeSpot(L, x, z) {
+  var B = lampBounds(L), best = null, bd = Infinity, gx, gz;
+  for (gx = B.x0; gx <= B.x1; gx += 20) for (gz = B.z0; gz <= B.z1; gz += 20) {
+    var d = (gx - x) * (gx - x) + (gz - z) * (gz - z);
+    if (d < bd && lampFree(L, gx, gz, 45)) { bd = d; best = { x: gx, z: gz }; }
+  }
+  return best;
+}
+// Ставить світильник у точку на столі: не за край і не на інші речі, ковзає вздовж перешкоди
+function placeLamp(L, x, z, force) {
+  var B = lampBounds(L), cur = L.group.position;
+  x = clamp(x, B.x0, B.x1);
+  z = clamp(z, B.z0, B.z1);
+  if (!force && !lampFree(L, x, z)) {
+    if (lampFree(L, x, cur.z)) z = cur.z;
+    else if (lampFree(L, cur.x, z)) x = cur.x;
+    else return;
+  }
+  L.group.position.set(x, 0, z);
+  L.bulb.position.set(x, L.h / 2, z);
+  if (L === V.active) updateMark();
+  var old = L.cord.geometry;
+  L.cord.geometry = new THREE.TubeGeometry(cordCurve(L, x, z), 120, 2.4, 10);
+  old.dispose();
+}
+// Після перебудови кімнати лишає світильники на місці, а якщо місце зайняте, шукає найближче вільне
+function resettleLamps() {
+  V.lamps.forEach(function (L) {
+    var p = L.group.position, B = lampBounds(L), x = clamp(p.x, B.x0, B.x1), z = clamp(p.z, B.z0, B.z1);
+    var s = lampFree(L, x, z) ? { x: x, z: z } : freeSpot(L, x, z) || { x: 0, z: 0 };
+    placeLamp(L, s.x, s.z, true);
+  });
+}
+// Новий світильник копіює вибраний, стає поруч і одразу вибирається для редагування
+function addLamp() {
+  if (!V || !V.desk || V.lamps.length >= MAX_LAMPS) return;
+  var L = makeLamp(), m = V.active.group.position;
+  fillLamp(L, V.p);
+  var s = freeSpot(L, m.x, m.z);
+  if (!s) { dropLamp(L); lampMsg('На столі немає вільного місця для ще одного світильника такого розміру.'); lampUi(); return; }
+  placeLamp(L, s.x, s.z, true);
+  V.active = L;
+  render();
+}
+function removeLamp() {
+  if (!V || V.lamps.length < 2) return;
+  dropLamp(V.active);
+  V.active = null;
+  selectLamp(V.lamps[0]);
+}
+// Переносить параметри світильника у форму; render() далі рахує все для нього
+function selectLamp(L) {
+  V.active = L;
+  var p = read();
+  LAMP_KEYS.forEach(function (k) { p[k] = L.p[k]; });
+  fill(p);
+  render();
+}
+// Рамка на столі навколо вибраного світильника, коли їх кілька
+function updateMark() {
+  var L = V.active;
+  if (!V.mark) {
+    V.mark = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0x2fb58f, fog: false }));
+    V.scene.add(V.mark);
+  }
+  V.mark.visible = !!L && V.lamps.length > 1;
+  if (!V.mark.visible) return;
+  var o = roundedRect(2 * L.hw + 36, 2 * L.hd + 36, 16), hole = roundedRect(2 * L.hw + 22, 2 * L.hd + 22, 10);
+  o.holes.push(hole);
+  V.mark.geometry.dispose();
+  V.mark.geometry = new THREE.ShapeGeometry(o, 8);
+  V.mark.rotation.x = -Math.PI / 2;
+  V.mark.position.set(L.group.position.x, 0.4, L.group.position.z);
+}
+function lampMsg(t) { var m = $('dlMsg'); if (m) m.textContent = t; }
+function lampUi() {
+  var n = V ? V.lamps.length : 1, rm = $('removeLamp'), ad = $('addLamp'), sel = $('lampSel');
+  if (rm) rm.hidden = n < 2;
+  if (ad) ad.disabled = n >= MAX_LAMPS;
+  if (sel) sel.textContent = n > 1 ? 'Редагується світильник ' + (V.lamps.indexOf(V.active) + 1) + ' з ' + n + ', він обведений на столі. Клацніть інший, щоб перейти до нього.' : '';
+}
+// Шнур виходить з-під задньої стінки світильника, йде по столу до стіни і вгору до розетки
+function cordCurve(L, x, z) {
+  var c = V.cordAt, cr = 2.4, w = c.back + cr + 2, k = V.lamps.indexOf(L), sx = c.sx + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 7;
+  var ax = x + L.cx, az = z - L.a.Ad / 2 + 20, bz = Math.min(az - 30, Math.max(w + 40, z - L.a.Ad / 2 - 40));
+  var pts = [[ax, cr, az], [ax, cr, bz]];
+  if (bz - w > 120) pts.push([(ax + sx) / 2 + 50, cr, (bz + w) / 2]);
+  pts.push([sx, cr, w], [sx, 40, w], [sx, c.sy - 60, w], [c.sx, c.sy - 22, c.back + 16]);
+  var base = new THREE.CatmullRomCurve3(pts.map(function (q) { return new THREE.Vector3(q[0], q[1], q[2]); }), false, 'centripetal');
+  // Згладжена крива на поворотах трохи виносить за точки: не даємо шнуру пірнати в стільницю і стіну
+  var curve = new THREE.Curve();
+  curve.getPoint = function (t, out) {
+    var p = base.getPoint(t, out || new THREE.Vector3());
+    p.y = Math.max(p.y, cr + 0.3);
+    p.z = Math.max(p.z, c.back + cr);
+    return p;
+  };
+  return curve;
+}
 function applyLight() {
   if (!V) return;
   var on = V.on, host = $('view3d'), lb = $('light');
-  V.amb.intensity = on ? 0.22 : 0.3;
-  V.d1.intensity = on ? 0.12 : 0.32;
-  V.d2.intensity = on ? 0.05 : 0.1;
-  V.group.children.forEach(function (o) {
+  V.amb.intensity = on ? 0.06 : 0.3;
+  V.hemi.intensity = on ? 0.03 : 0.45;
+  V.d1.intensity = on ? 0 : 0.75;
+  V.d2.intensity = on ? 0.02 : 0.16;
+  // Кілька ламп разом не мають засвічувати кімнату до білого
+  V.lamps.forEach(function (L) { L.bulb.intensity = on ? 2.2 / Math.sqrt(V.lamps.length) : 0; });
+  V.screenLight.intensity = on ? 0.35 : 0;
+  if (V.sky) V.sky.color.setHex(on ? 0x1b2340 : 0xffffff);
+  var room = on ? 0x15161b : 0xd8d1c4;
+  V.scene.background.setHex(room);
+  V.scene.fog.color.setHex(room);
+  V.lamps.forEach(function (L) { L.group.children.forEach(function (o) {
     var m = o.material;
     if (o.userData.kind === 'acryl') {
       m.emissive.setHex(0xffdfae);
@@ -904,7 +1135,7 @@ function applyLight() {
       m.emissiveIntensity = on ? 0.75 : 0;
     }
     m.needsUpdate = true;
-  });
+  }); });
   if (host) host.classList.toggle('lit', on);
   if (lb) { lb.setAttribute('aria-pressed', on ? 'true' : 'false'); lb.textContent = on ? 'Вимкнути світло' : 'Увімкнути світло'; }
 }
@@ -922,6 +1153,7 @@ function draw() {
   var R = V.R * V.zoom;
   V.cam.position.set(R * Math.sin(V.phi) * Math.sin(V.theta), V.cy + R * Math.cos(V.phi), R * Math.sin(V.phi) * Math.cos(V.theta));
   V.cam.lookAt(0, V.cy, 0);
+  V.scene.fog.near = R * 2; V.scene.fog.far = R * 6;
   V.r.render(V.scene, V.cam);
 }
 function showModel(p) {
@@ -929,41 +1161,289 @@ function showModel(p) {
   if (!V || !host) return;
   host.appendChild(V.r.domElement);
   if (V.ro) { V.ro.disconnect(); V.ro.observe(host); }
-  var sig = JSON.stringify([p.W, p.D, p.H, p.chip, p.gap, p.tm, p.ta, p.edge, p.bottom, p.lid, p.walls, p.mcolor]);
-  if (sig !== V.sig) {
-    V.sig = sig;
-    while (V.group.children.length) {
-      var o = V.group.children[V.group.children.length - 1];
-      V.group.remove(o);
-      o.geometry.dispose(); o.material.dispose();
-    }
-    var boxes = modelBoxes(p);
-    boxes.filter(function (b) { return b.kind === 'acryl'; }).forEach(function (b) {
-      var m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xf4f8fa, emissive: 0xffd9a0, emissiveIntensity: 0.35, transparent: true, opacity: 0.55, roughness: 0.2 }));
-      m.position.set(b.c[0], b.c[2], -b.c[1]);
-      m.scale.set(b.s[0], b.s[2], b.s[1]);
-      m.userData.kind = 'acryl';
-      V.group.add(m);
-    });
-    var chips = boxes.filter(function (b) { return b.kind === 'chip'; });
-    if (chips.length) {
-      var im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: new THREE.Color(mosaicOf(p).hex), roughness: 0.3, metalness: 0.05 }), chips.length);
-      var M = new THREE.Matrix4(), Q = new THREE.Quaternion();
-      chips.forEach(function (b, i) {
-        M.compose(new THREE.Vector3(b.c[0], b.c[2], -b.c[1]), Q, new THREE.Vector3(b.s[0], b.s[2], b.s[1]));
-        im.setMatrixAt(i, M);
-      });
-      im.instanceMatrix.needsUpdate = true;
-      im.frustumCulled = false;
-      im.userData.kind = 'chip';
-      V.group.add(im);
-    }
-    var a = acrylicParts(p);
-    V.cy = a.Ah / 2;
-    V.R = Math.sqrt(a.Aw * a.Aw + a.Ad * a.Ad + a.Ah * a.Ah) * 2.1 + 40;
+  if (!V.active) V.active = V.lamps[0];
+  if (lampSig(p) !== V.active.sig) {
+    fillLamp(V.active, p);
+    if (V.desk) resettleLamps();
   }
+  if (!V.desk) buildDesk();
+  V.p = p;
   applyLight();
+  lampUi();
+  updateMark();
   fit();
+}
+// ---- Кімната з робочим столом навколо світильника, щоб відчувати масштаб (усе в мм, y вгору, перед на +z) ----
+function seeded(seed) { return function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }; }
+function canvasTex(W, H, paint, repeat) {
+  var cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  paint(cv.getContext('2d'), W, H);
+  var t = new THREE.CanvasTexture(cv);
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+// Деревина: хвилясті волокна, що безшовно повторюються; planks — висота дошки в пікселях
+function woodTexture(base, dark, light, seed, planks) {
+  return canvasTex(1024, 256, function (g, W, H) {
+    var rnd = seeded(seed), i, k, x;
+    g.fillStyle = base; g.fillRect(0, 0, W, H);
+    for (i = 0; i < 320; i++) {
+      var y = rnd() * H, amp = 1 + rnd() * 5, f = (1 + Math.floor(rnd() * 3)) * 2 * Math.PI / W, ph = rnd() * 6;
+      g.strokeStyle = (rnd() < 0.6 ? dark : light) + (0.04 + rnd() * 0.12) + ')';
+      g.lineWidth = 0.6 + rnd() * 2.2;
+      for (k = -1; k <= 1; k++) {
+        g.beginPath();
+        for (x = 0; x <= W; x += 8) { var yy = y + k * H + Math.sin(x * f + ph) * amp; if (x) g.lineTo(x, yy); else g.moveTo(x, yy); }
+        g.stroke();
+      }
+    }
+    if (planks) {
+      g.fillStyle = 'rgba(40,28,18,0.45)';
+      for (i = 0; i < H; i += planks) {
+        g.fillRect(0, i, W, 2);
+        g.fillRect(Math.floor(rnd() * W), i, 2, planks);
+        for (k = 0; k < 3; k++) { g.fillStyle = 'rgba(' + (rnd() < 0.5 ? '255,235,210,' : '60,40,20,') + (rnd() * 0.08) + ')'; g.fillRect(0, i + 2, W, planks - 2); }
+        g.fillStyle = 'rgba(40,28,18,0.45)';
+      }
+    }
+  }, true);
+}
+function screenTexture() {
+  return canvasTex(1024, 576, function (g, W, H) {
+    var rnd = seeded(11), i, x;
+    g.fillStyle = '#1e1f25'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#2a2b33'; g.fillRect(0, 0, W, 34);
+    g.fillStyle = '#25262d'; g.fillRect(0, 34, 190, H - 34);
+    ['#ff5f57', '#febc2e', '#28c840'].forEach(function (c, j) { g.fillStyle = c; g.beginPath(); g.arc(22 + j * 22, 17, 7, 0, 7); g.fill(); });
+    for (i = 0; i < 16; i++) { g.fillStyle = 'rgba(200,205,220,' + (0.25 + rnd() * 0.3) + ')'; g.fillRect(24 + (i % 4 ? 16 : 0), 56 + i * 26, 60 + rnd() * 80, 9); }
+    var cols = ['#c792ea', '#82aaff', '#c3e88d', '#f78c6c', '#89ddff', '#d6d9e3', '#ffcb6b'];
+    for (i = 0; i < 24; i++) {
+      x = 220 + Math.floor(rnd() * 4) * 28;
+      g.fillStyle = 'rgba(140,145,160,0.5)'; g.fillRect(200, 56 + i * 21, 10, 9);
+      while (rnd() < 0.8 && x < W - 60) {
+        var w = 20 + rnd() * 110;
+        g.fillStyle = cols[Math.floor(rnd() * cols.length)]; g.fillRect(x, 56 + i * 21, w, 9);
+        x += w + 10;
+      }
+    }
+  });
+}
+function artTexture() {
+  return canvasTex(768, 512, function (g, W, H) {
+    var sky = g.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#f6d7b0'); sky.addColorStop(1, '#f1b98a');
+    g.fillStyle = sky; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#e8663a'; g.beginPath(); g.arc(W * 0.66, H * 0.42, 70, 0, 7); g.fill();
+    [['#d98b5f', 0.55, 40], ['#3f6f6a', 0.66, 55], ['#2c4f52', 0.78, 45], ['#1f3a3d', 0.9, 30]].forEach(function (l, j) {
+      g.fillStyle = l[0]; g.beginPath(); g.moveTo(0, H);
+      for (var x = 0; x <= W; x += 8) g.lineTo(x, H * l[1] - Math.sin(x / W * Math.PI * (1.5 + j * 0.7) + j) * l[2]);
+      g.lineTo(W, H); g.fill();
+    });
+  });
+}
+function clockTexture() {
+  return canvasTex(512, 512, function (g) {
+    var i, c = 256;
+    g.fillStyle = '#f7f5ef'; g.fillRect(0, 0, 512, 512);
+    g.fillStyle = '#26272b';
+    for (i = 0; i < 60; i++) {
+      g.save(); g.translate(c, c); g.rotate(i * Math.PI / 30);
+      if (i % 5) g.fillRect(-2, -236, 4, 14); else g.fillRect(-6, -236, 12, 44);
+      g.restore();
+    }
+    function hand(ang, len, w, col) { g.save(); g.translate(c, c); g.rotate(ang); g.fillStyle = col; g.fillRect(-w / 2, -len, w, len + 30); g.restore(); }
+    hand(Math.PI * 2 * (10 + 10 / 60) / 12, 130, 14, '#26272b');
+    hand(Math.PI * 2 * 10 / 60, 190, 9, '#26272b');
+    hand(Math.PI * 2 * 38 / 60, 205, 3, '#c9212f');
+    g.fillStyle = '#c9212f'; g.beginPath(); g.arc(c, c, 10, 0, 7); g.fill();
+  });
+}
+function skyTexture() {
+  return canvasTex(256, 512, function (g, W, H) {
+    var s = g.createLinearGradient(0, 0, 0, H), rnd = seeded(5), i;
+    s.addColorStop(0, '#8fbce6'); s.addColorStop(0.7, '#d9ecf7'); s.addColorStop(1, '#eef4f0');
+    g.fillStyle = s; g.fillRect(0, 0, W, H);
+    for (i = 0; i < 14; i++) { g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(rnd() * W, 60 + rnd() * 160, 30 + rnd() * 40, 10 + rnd() * 10, 0, 0, 7); g.fill(); }
+    g.fillStyle = '#6f8f6a';
+    for (i = 0; i < 9; i++) { g.beginPath(); g.arc(i * 32 + rnd() * 10, H - 40 + rnd() * 20, 30 + rnd() * 20, 0, 7); g.fill(); }
+  });
+}
+function roomTextures() {
+  return {
+    wood: woodTexture('#b48656', 'rgba(92,56,26,', 'rgba(236,196,148,', 7, 0),
+    floor: woodTexture('#9c7b5c', 'rgba(70,48,30,', 'rgba(220,190,160,', 3, 64),
+    screen: screenTexture(), art: artTexture(), clock: clockTexture(), sky: skyTexture()
+  };
+}
+function roundedRect(w, h, r) {
+  var s = new THREE.Shape(), x = -w / 2, y = -h / 2;
+  s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+// Розставлено під світильник близько 140 мм у центрі; більші світильники самі шукають вільне місце
+function buildDesk() {
+  var env = V.env, T = V.tex, hx = 70, hz = 70;
+  while (env.children.length) {
+    var old = env.children.pop();
+    old.traverse(function (o) { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  }
+  function mat(c, rough, extra) { return new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: rough, metalness: 0 }, extra || {})); }
+  function mesh(geo, m, x, y, z, parent) {
+    var o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; o.receiveShadow = true;
+    (parent || env).add(o); return o;
+  }
+  function box(w, h, d, m, x, y, z, parent) { return mesh(new THREE.BoxGeometry(w, h, d), m, x, y, z, parent); }
+  function group(x, z, ry, y) { var g = new THREE.Group(); g.position.set(x, y || 0, z); g.rotation.y = ry; env.add(g); return g; }
+
+  // ---- Кімната: кут із лівою стіною, вікно, підлога з ламінату. Стільниця на висоті 750 мм ----
+  var FL = -750, TOP = 2000, back = -hz - 420, L = -hx - 820, winZ = back + 1250, winW = 1000, winY0 = 60, winY1 = 1300;
+  var paint = mat(0xf3eee6, 0.95), side = mat(0xebe5da, 0.95), white = mat(0xf4f3ef, 0.5);
+  T.floor.repeat.set(6000 / 1200, 6000 / 300);
+  var floor = mesh(new THREE.PlaneGeometry(6000, 6000), mat(0xffffff, 0.7, { map: T.floor }), L + 3000, FL, back + 3000);
+  floor.rotation.x = -Math.PI / 2; floor.castShadow = false;
+  var wall = box(6000, TOP - FL, 40, paint, L + 3000, (TOP + FL) / 2, back - 20);
+  wall.castShadow = false;
+  // Ліва стіна з прорізом під вікно: чотири частини навколо прорізу
+  var z0 = back, z1 = back + 4000, wz0 = winZ - winW / 2, wz1 = winZ + winW / 2, wx = L - 20;
+  box(40, TOP - FL, wz0 - z0, side, wx, (TOP + FL) / 2, (z0 + wz0) / 2);
+  box(40, TOP - FL, z1 - wz1, side, wx, (TOP + FL) / 2, (wz1 + z1) / 2);
+  box(40, winY0 - FL, winW, side, wx, (winY0 + FL) / 2, winZ);
+  box(40, TOP - winY1, winW, side, wx, (TOP + winY1) / 2, winZ);
+  // Вікно: рама, імпост, підвіконня і небо за склом
+  var skyM = new THREE.MeshBasicMaterial({ map: T.sky, fog: false });
+  var sky = new THREE.Mesh(new THREE.PlaneGeometry(winW, winY1 - winY0), skyM);
+  sky.position.set(L - 300, (winY0 + winY1) / 2, winZ); sky.rotation.y = Math.PI / 2; env.add(sky);
+  var fr = 60;
+  box(70, fr, winW, white, L - 20, winY0 + fr / 2, winZ);
+  box(70, fr, winW, white, L - 20, winY1 - fr / 2, winZ);
+  box(70, winY1 - winY0, fr, white, L - 20, (winY0 + winY1) / 2, wz0 + fr / 2);
+  box(70, winY1 - winY0, fr, white, L - 20, (winY0 + winY1) / 2, wz1 - fr / 2);
+  box(70, winY1 - winY0, fr * 0.8, white, L - 20, (winY0 + winY1) / 2, winZ);
+  box(200, 25, winW + 100, white, L + 60, winY0 - 12, winZ);
+  var glass = new THREE.Mesh(new THREE.PlaneGeometry(winW, winY1 - winY0), new THREE.MeshStandardMaterial({ color: 0xdfeef5, transparent: true, opacity: 0.12, roughness: 0.05 }));
+  glass.position.set(L - 25, (winY0 + winY1) / 2, winZ); glass.rotation.y = Math.PI / 2; env.add(glass);
+  // Плінтуси
+  box(6000, 80, 16, white, L + 3000, FL + 40, back + 8);
+  box(16, 80, 4000, white, L + 8, FL + 40, back + 2000);
+
+  // ---- Стіл 1600 × 750 мм: стільниця і металеві ніжки ----
+  var front = Math.max(back + 750, hz + 330), x0 = L + 30, x1 = x0 + 1600, depth = front - back;
+  T.wood.repeat.set(1600 / 800, depth / 200);
+  var desk = box(x1 - x0, 28, depth - 10, mat(0xffffff, 0.62, { map: T.wood }), (x0 + x1) / 2, -14, (back + front) / 2 + 5);
+  var steel = mat(0x2b2c30, 0.45, { metalness: 0.6 });
+  [[x0 + 60, back + 70], [x1 - 60, back + 70], [x0 + 60, front - 70], [x1 - 60, front - 70]].forEach(function (q) {
+    box(40, -FL - 28, 40, steel, q[0], (FL - 28) / 2, q[1]);
+  });
+  box(x1 - x0 - 120, 60, 25, steel, (x0 + x1) / 2, -58, back + 70);
+
+  // ---- Комп'ютер: монітор 24", клавіатура, мишка ----
+  var mon = group(-hx - 390, back + 190, 0.28);
+  var monBase = box(230, 8, 180, steel, 0, 4, 0, mon);
+  box(40, 300, 22, steel, 0, 158, -40, mon);
+  box(544, 328, 22, mat(0x1d1e22, 0.5), 0, 340, -18, mon);
+  var scr = new THREE.Mesh(new THREE.PlaneGeometry(527, 297), new THREE.MeshBasicMaterial({ map: T.screen }));
+  scr.position.set(0, 345, -6.8); mon.add(scr);
+  V.screenLight.position.set(mon.position.x + 60, 340, mon.position.z + 150);
+
+  var kb = group(-hx - 350, hz * 0.2 + 70, 0.1);
+  box(440, 16, 135, mat(0xc9cbcf, 0.4, { metalness: 0.5 }), 0, 8, 0, kb);
+  var keys = [], r, c;
+  for (r = 0; r < 5; r++) for (c = 0; c < 22; c++) keys.push([-209 + c * 19, -46 + r * 19, 15]);
+  for (c = 0; c < 22; c++) if (c < 7 || c > 14) keys.push([-209 + c * 19, 49, 15]);
+  keys.push([0, 49, 148]);
+  var km = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat(0xf2f2f0, 0.55), keys.length), KM = new THREE.Matrix4(), KQ = new THREE.Quaternion();
+  keys.forEach(function (k, i) { KM.compose(new THREE.Vector3(k[0], 19, k[1]), KQ, new THREE.Vector3(k[2], 6, 15)); km.setMatrixAt(i, KM); });
+  km.castShadow = km.receiveShadow = true;
+  kb.add(km);
+
+  var mouse = group(-hx - 75, hz + 110, 0.15);
+  var shell = mesh(new THREE.SphereGeometry(1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf2f2f0, 0.4), 0, 0, 0, mouse);
+  shell.scale.set(31, 36, 58);
+  box(1.2, 4, 40, mat(0x9a9ca0, 0.5), 0, 34, -24, mouse);
+
+  // ---- Дрібниці: чашка, блокнот А5 з олівцем, телефон ----
+  var mug = group(hx + 120, hz * 0.3 + 30, -2.2);
+  var prof = [[0, 0], [38, 0], [41, 3], [41, 95], [37.5, 95], [37.5, 8], [0, 8]].map(function (q) { return new THREE.Vector2(q[0], q[1]); });
+  var ceramic = mat(0xeeeae2, 0.35);
+  mesh(new THREE.LatheGeometry(prof, 48), ceramic, 0, 0, 0, mug);
+  mesh(new THREE.TorusGeometry(22, 5.5, 12, 28, Math.PI), ceramic, 39, 50, 0, mug).rotation.z = -Math.PI / 2;
+  mesh(new THREE.CircleGeometry(37.5, 40), mat(0x3a2215, 0.15), 0, 80, 0, mug).rotation.x = -Math.PI / 2;
+
+  var nb = group(hx + 90, hz + 190, -0.25);
+  box(146, 10, 205, mat(0xf2eee4, 0.9), 1, 6, 0, nb);
+  var cover = mat(0x2f4a52, 0.7);
+  box(148, 1, 210, cover, 0, 0.5, 0, nb);
+  box(148, 1, 210, cover, 0, 11.5, 0, nb);
+  box(2, 12, 210, cover, -74, 6, 0, nb);
+  box(6, 12.6, 211, mat(0x1c1c1f, 0.6), 58, 6, 0, nb);
+
+  var pr = 3.6, len = 150, pencil = group(hx + 80, hz + 180, 0.5, 12.6 + pr * 0.87), pen = new THREE.Group();
+  pen.rotation.z = Math.PI / 2; pencil.add(pen);
+  mesh(new THREE.CylinderGeometry(pr, pr, len, 6), mat(0xe9b41f, 0.5), 0, 0, 0, pen).rotation.y = Math.PI / 6;
+  mesh(new THREE.ConeGeometry(pr, 16, 6, 1, true), mat(0xe2c091, 0.8), 0, len / 2 + 8, 0, pen).rotation.y = Math.PI / 6;
+  mesh(new THREE.ConeGeometry(1.2, 4.2, 12), mat(0x2b2b2e, 0.4), 0, len / 2 + 14.5, 0, pen);
+  mesh(new THREE.CylinderGeometry(pr + 0.2, pr + 0.2, 7, 16), mat(0xb8b8b4, 0.3, { metalness: 0.8 }), 0, -len / 2 - 3.5, 0, pen);
+  mesh(new THREE.CylinderGeometry(pr, pr, 6, 16), mat(0xe58c8f, 0.8), 0, -len / 2 - 10, 0, pen);
+
+  var ph = group(hx + 125, -hz - 80, -0.45);
+  mesh(new THREE.ExtrudeGeometry(roundedRect(71.5, 147, 10), { depth: 6.4, bevelEnabled: true, bevelThickness: 0.7, bevelSize: 0.7, bevelSegments: 2, curveSegments: 8 }),
+    mat(0x3b3d42, 0.35, { metalness: 0.6 }), 0, 0.7, 0, ph).rotation.x = -Math.PI / 2;
+  mesh(new THREE.ShapeGeometry(roundedRect(68, 143.5, 8.5), 8), mat(0x07080b, 0.08, { metalness: 0.3 }), 0, 7.9, 0, ph).rotation.x = -Math.PI / 2;
+
+  // ---- Розетка; шнури до неї будує placeLamp ----
+  var sx = Math.min(hx * 0.5, 40) + 90, sy = 190;
+  V.cordAt = { sx: sx, sy: sy, back: back };
+  box(82, 82, 10, white, sx, sy, back + 5);
+  box(38, 38, 26, white, sx, sy, back + 13);
+
+  // ---- На стіні: картина в рамі, годинник, полиця з книжками і вазоном ----
+  var art = group(hx + 330, back + 12, 0, 560);
+  box(520, 370, 24, mat(0x2a2522, 0.55), 0, 0, 0, art);
+  box(480, 330, 2, mat(0xf5f2ea, 0.9), 0, 0, 12.5, art);
+  var pic = mesh(new THREE.PlaneGeometry(380, 253), mat(0xffffff, 0.8, { map: T.art }), 0, 0, 14, art);
+  pic.castShadow = false;
+
+  var clock = group(hx + 880, back + 6, 0, 720);
+  mesh(new THREE.CylinderGeometry(160, 160, 12, 64), mat(0x3a3b40, 0.4, { metalness: 0.5 }), 0, 0, 0, clock).rotation.x = Math.PI / 2;
+  var face = mesh(new THREE.CircleGeometry(148, 64), mat(0xffffff, 0.6, { map: T.clock }), 0, 0, 6.5, clock);
+  face.castShadow = false;
+
+  var shelf = group(-hx - 380, back, 0, 700);
+  box(700, 22, 200, mat(0xffffff, 0.6, { map: T.wood }), 0, 0, 100, shelf);
+  var bx = -320, bookCols = [0x8c2f2f, 0x2f4a6b, 0xd9c7a0, 0x3e5e44, 0x6b4a8c, 0xc9832f, 0x2b2b2e, 0x9aa9b5];
+  bookCols.forEach(function (col, i) {
+    var w = 24 + (i * 37 % 17), h = 170 + (i * 53 % 70);
+    box(w, h, 150 + (i % 3) * 15, mat(col, 0.8), bx + w / 2, 11 + h / 2, 95, shelf);
+    bx += w + 1;
+  });
+  var tilt = box(28, 190, 160, mat(0x7a3b2a, 0.8), bx + 50, 11 + 92, 95, shelf);
+  tilt.rotation.z = -0.3;
+  var pot = mesh(new THREE.CylinderGeometry(55, 42, 100, 32), mat(0xc0673f, 0.85), 220, 61, 100, shelf);
+  pot.receiveShadow = true;
+  var leaf = mat(0x4f7d3a, 0.7), rl = seeded(9);
+  for (var i = 0; i < 14; i++) {
+    var an = rl() * Math.PI * 2, rr = 10 + rl() * 40, lv = mesh(new THREE.SphereGeometry(1, 12, 8), leaf, 220 + Math.cos(an) * rr, 120 + rl() * 70, 100 + Math.sin(an) * rr, shelf);
+    lv.scale.set(18 + rl() * 10, 32 + rl() * 20, 12);
+    lv.rotation.set(rl() - 0.5, an, (rl() - 0.5) * 1.4);
+  }
+
+  // Сонце світить у вікно: тінь рами падає на стіл і підлогу
+  var S = 2700, sc = V.d1.shadow.camera;
+  V.d1.target.position.set(L + 700, -200, winZ - 300);
+  V.d1.position.set(L - 1500, 1900, winZ + 500);
+  sc.left = -S; sc.right = S; sc.top = S; sc.bottom = -S; sc.near = 10; sc.far = 7000;
+  sc.updateProjectionMatrix();
+  // Куди можна ставити світильники: стільниця повз інші речі
+  V.desk = { x0: x0, x1: x1, back: back, front: front };
+  env.updateMatrixWorld(true);
+  V.obst = [monBase, kb, mouse, mug, nb, ph].map(function (o) { return new THREE.Box3().setFromObject(o); });
+  resettleLamps();
+  V.sky = skyM;
 }
 function download(p) {
   var msg = $('dlMsg'), name = 'svitylnyk-' + p.W + 'x' + p.D + 'x' + p.H + '.zip', data = modelZip(Object.assign({}, p, { hex: mosaicOf(p).hex }));
